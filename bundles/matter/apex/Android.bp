@@ -1,0 +1,78 @@
+// com.everyware.matter: MatterServiceBundle, its manifest, orchestration, policy and configuration.
+
+package {
+    default_applicable_licenses: ["Android-Apache-2.0"],
+}
+
+apex {
+    name: "com.everyware.matter",
+    manifest: "apex_manifest.json",
+    file_contexts: "file_contexts",
+    key: "com.everyware.matter.key",
+    prebuilts: [
+        "com.everyware.matter.service_bundles_manifest",
+        "com.everyware.matter.linker_config",
+        "com.everyware.matter.orch",
+        "com.everyware.matter.permissions",
+        "com.everyware.matter.pairing",
+    ],
+    updatable: false,
+    product_specific: true,
+    arch: {
+        arm64: {
+            native_shared_libs: ["libeveryware_matter_bundle"],
+        },
+        x86_64: {
+            native_shared_libs: ["libeveryware_matter_bundle"],
+        },
+        riscv64: {
+            enabled: false,
+        },
+    },
+}
+
+// Test key, generated for this project. A device that ships signs with its own.
+apex_key {
+    name: "com.everyware.matter.key",
+    public_key: "keys/com.everyware.matter.avbpubkey",
+    private_key: "keys/com.everyware.matter.pem",
+}
+
+prebuilt_etc {
+    name: "com.everyware.matter.service_bundles_manifest",
+    src: "sdv_service_bundles_manifest.textproto",
+    filename: "sdv_service_bundles_manifest.textproto",
+    installable: false,
+}
+
+linker_config {
+    name: "com.everyware.matter.linker_config",
+    src: "linker.config.json",
+    installable: false,
+}
+
+prebuilt_etc {
+    name: "com.everyware.matter.orch",
+    src: "MatterServiceBundleOrchestration.textproto",
+    filename: "MatterServiceBundleOrchestration.textproto",
+    sub_dir: "orch",
+    installable: false,
+}
+
+// The authz policy of the bundle, read by the agents at boot.
+prebuilt_etc {
+    name: "com.everyware.matter.permissions",
+    src: "permissions.textproto",
+    sub_dir: "permissions",
+    filename: "matter_permissions.textproto",
+    installable: false,
+}
+
+// The pairing codes of the devices the bundle commissions (one per line).
+prebuilt_etc {
+    name: "com.everyware.matter.pairing",
+    src: "pairing.txt",
+    sub_dir: "matter",
+    filename: "pairing.txt",
+    installable: false,
+}

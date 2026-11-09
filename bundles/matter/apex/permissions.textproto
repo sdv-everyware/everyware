@@ -1,0 +1,12 @@
+# proto-file: //system/software_defined_vehicle/middleware/service_authz/proto/sdv/authz/policy/authz_policy.proto
+# proto-message: AuthzPolicy
+#
+# What the Matter bundle may publish and serve (catalog/everyware.vsidl).
+publisher {
+  message: "com.everyware.MatterDevices"
+  topic: "matter-devices"
+}
+server {
+  service: "com.everyware.MatterService"
+  channel: "matter"
+}

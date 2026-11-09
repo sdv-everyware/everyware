@@ -1,0 +1,50 @@
+// The house's Matter controller (src/lib.rs): the fabric, commissioning, reading the devices and
+// their commands, on rs-matter (vendor/sdv-everyware/third_party/rust). No SDV types: the bundle
+// turns its snapshots into the catalog's messages.
+
+package {
+    default_applicable_licenses: ["Android-Apache-2.0"],
+}
+
+rust_defaults {
+    name: "everyware_matter_client_defaults",
+    crate_name: "everyware_matter_client",
+    srcs: ["src/lib.rs"],
+    edition: "2021",
+    rustlibs: [
+        "liblog_rust",
+        // rs-matter: os, openssl (BoringSSL), log; its commissioner and IM client
+        "librs_matter-rsm",
+        "libasync_io-rsm",
+        "libif_addrs-rsm",
+        "librand-rsm",
+        "libsocket2",
+    ],
+}
+
+// An rlib only, like the rs-matter crates it links (third_party/rust): a dylib would link log
+// and socket2 a second time, as dylibs, next to the copies in those rlibs. The bundle links it
+// into its shared library.
+rust_library_rlib {
+    name: "libeveryware_matter_client",
+    defaults: ["everyware_matter_client_defaults"],
+    host_supported: true,
+    // the bundles are /product APEXes
+    product_available: true,
+    apex_available: [
+        "//apex_available:platform",
+        "//apex_available:anyapex",
+    ],
+    min_sdk_version: "35",
+    arch: {
+        riscv64: {
+            enabled: false,
+        },
+    },
+}
+
+rust_test_host {
+    name: "everyware_matter_client_test",
+    defaults: ["everyware_matter_client_defaults"],
+    test_suites: ["general-tests"],
+}

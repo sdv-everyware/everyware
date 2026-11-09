@@ -1,0 +1,4 @@
+# The manual pairing codes of the devices MatterServiceBundle commissions, one per line; each is
+# commissioned once (the bundle keeps its fabric and nodes in its directory).
+# The virtual devices of tools/matter-generator (its default code):
+3497-011-2332
