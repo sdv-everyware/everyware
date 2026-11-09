@@ -1,0 +1,38 @@
+# proto-file: //system/software_defined_vehicle/middleware/service_authz/proto/sdv/authz/policy/authz_policy.proto
+# proto-message: AuthzPolicy
+#
+# What DashboardServiceBundle may do on the SDV middleware: read what the dashboard shows.
+# The same topics as in catalog/everyware.vsidl.
+
+subscriber {
+  message: "com.everyware.Weather"
+  topic: "weather"
+}
+subscriber {
+  message: "com.everyware.WifiNetworks"
+  topic: "wifi-networks"
+}
+subscriber {
+  message: "com.everyware.WifiState"
+  topic: "wifi-state"
+}
+subscriber {
+  message: "com.everyware.NewsFeed"
+  topic: "news"
+}
+subscriber {
+  message: "com.everyware.NewsThumbnails"
+  topic: "news-thumbnails"
+}
+subscriber {
+  message: "com.everyware.MatterDevices"
+  topic: "matter-devices"
+}
+client {
+  service: "com.everyware.WifiService"
+  channel: "wifi"
+}
+client {
+  service: "com.everyware.MatterService"
+  channel: "matter"
+}

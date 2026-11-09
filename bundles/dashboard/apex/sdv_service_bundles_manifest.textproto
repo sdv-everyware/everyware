@@ -1,0 +1,13 @@
+# proto-file:
+# //system/software_defined_vehicle/service_bundles_registry/proto/sdv_service_bundles_manifest.proto
+# proto-message: SdvServiceBundleManifestEntry
+
+sdv_service_bundle_metadata {
+  name: "DashboardServiceBundle"
+  version_number: 1
+  version_name: "1"
+  native_library_path: "lib64/libeveryware_dashboard_bundle.so"
+  log_tag: "dashboard_bundle"
+  orchestration_config_path: "etc/orch/DashboardServiceBundleOrchestration.textproto"
+  authorization_policy_path: "etc/permissions/dashboard_permissions.textproto"
+}

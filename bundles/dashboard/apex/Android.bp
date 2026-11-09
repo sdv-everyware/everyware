@@ -1,0 +1,68 @@
+// com.everyware.dashboard: WeatherBundle, its manifest and its orchestration config.
+
+package {
+    default_applicable_licenses: ["Android-Apache-2.0"],
+}
+
+apex {
+    name: "com.everyware.dashboard",
+    manifest: "apex_manifest.json",
+    file_contexts: "file_contexts",
+    key: "com.everyware.dashboard.key",
+    prebuilts: [
+        "com.everyware.dashboard.service_bundles_manifest",
+        "com.everyware.dashboard.linker_config",
+        "com.everyware.dashboard.orch",
+        "com.everyware.dashboard.permissions",
+    ],
+    updatable: false,
+    product_specific: true,
+    arch: {
+        arm64: {
+            native_shared_libs: ["libeveryware_dashboard_bundle"],
+        },
+        x86_64: {
+            native_shared_libs: ["libeveryware_dashboard_bundle"],
+        },
+        riscv64: {
+            enabled: false,
+        },
+    },
+}
+
+// Test key, generated for this project. A device that ships signs with its own.
+apex_key {
+    name: "com.everyware.dashboard.key",
+    public_key: "keys/com.everyware.dashboard.avbpubkey",
+    private_key: "keys/com.everyware.dashboard.pem",
+}
+
+prebuilt_etc {
+    name: "com.everyware.dashboard.service_bundles_manifest",
+    src: "sdv_service_bundles_manifest.textproto",
+    filename: "sdv_service_bundles_manifest.textproto",
+    installable: false,
+}
+
+linker_config {
+    name: "com.everyware.dashboard.linker_config",
+    src: "linker.config.json",
+    installable: false,
+}
+
+prebuilt_etc {
+    name: "com.everyware.dashboard.orch",
+    src: "DashboardServiceBundleOrchestration.textproto",
+    filename: "DashboardServiceBundleOrchestration.textproto",
+    sub_dir: "orch",
+    installable: false,
+}
+
+// The authz policy of the bundle, read by the agents at boot.
+prebuilt_etc {
+    name: "com.everyware.dashboard.permissions",
+    src: "permissions.textproto",
+    sub_dir: "permissions",
+    filename: "dashboard_permissions.textproto",
+    installable: false,
+}
