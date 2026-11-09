@@ -1,0 +1,49 @@
+// HTTPS client of the service bundles that talk to the internet (src/lib.rs): the weather's
+// Open-Meteo client, the news bundle.
+
+package {
+    default_applicable_licenses: ["Android-Apache-2.0"],
+}
+
+rust_defaults {
+    name: "everyware_https_defaults",
+    crate_name: "everyware_https",
+    srcs: ["src/lib.rs"],
+    rustlibs: [
+        "liblog_rust",
+        // HTTPS on the stack SDV itself uses for SDV-RPC (sdv_comms/sdk/rs/rpc/tls.rs):
+        // hyper over tokio-openssl over BoringSSL. A second TLS stack in the same process
+        // (rustls / aws-lc-rs) would bring BoringSSL's Rust bindings in twice.
+        "libbytes",
+        "libhttp_body_util",
+        "libhyper",
+        "libhyper_util",
+        "libopenssl",
+        "libtokio",
+        "libtokio_openssl-ew",
+    ],
+}
+
+rust_library {
+    name: "libeveryware_https",
+    defaults: ["everyware_https_defaults"],
+    // the host tests of the clients that use it
+    host_supported: true,
+    // the bundles are /product APEXes
+    product_available: true,
+    apex_available: [
+        "//apex_available:platform",
+        "//apex_available:anyapex",
+    ],
+    arch: {
+        riscv64: {
+            enabled: false,
+        },
+    },
+}
+
+rust_test_host {
+    name: "everyware_https_test",
+    defaults: ["everyware_https_defaults"],
+    test_suites: ["general-tests"],
+}

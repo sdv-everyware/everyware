@@ -1,0 +1,39 @@
+// A service bundle's own files (src/lib.rs): the last messages a bundle published, published
+// again at its next start. Used by the weather and the news bundles.
+
+package {
+    default_applicable_licenses: ["Android-Apache-2.0"],
+}
+
+rust_defaults {
+    name: "everyware_bundle_store_defaults",
+    crate_name: "everyware_bundle_store",
+    srcs: ["src/lib.rs"],
+    rustlibs: [
+        "liblog_rust",
+        "libprotobuf",
+    ],
+}
+
+rust_library {
+    name: "libeveryware_bundle_store",
+    defaults: ["everyware_bundle_store_defaults"],
+    host_supported: true,
+    // the bundles are /product APEXes
+    product_available: true,
+    apex_available: [
+        "//apex_available:platform",
+        "//apex_available:anyapex",
+    ],
+    arch: {
+        riscv64: {
+            enabled: false,
+        },
+    },
+}
+
+rust_test_host {
+    name: "everyware_bundle_store_test",
+    defaults: ["everyware_bundle_store_defaults"],
+    test_suites: ["general-tests"],
+}
