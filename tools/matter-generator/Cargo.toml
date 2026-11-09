@@ -1,0 +1,28 @@
+[package]
+name = "matter-generator"
+version = "0.1.0"
+edition = "2021"
+description = "A virtual Matter device for SDV EveryWare: one node with the four devices of the dashboard"
+license = "Apache-2.0"
+publish = false
+
+[dependencies]
+# rs-matter at the commit the generator was written against; its API still moves.
+rs-matter = { git = "https://github.com/project-chip/rs-matter", rev = "bf3fe6b94f6428d12611c67fcf698883c269507d", features = [
+    "async-io",
+    "groups",
+    "persistent-subscriptions",
+    "max-groups-per-fabric-12",
+    "max-group-keys-per-fabric-3",
+    "max-group-endpoints-per-fabric-3",
+    "max-sessions-32",
+] }
+log = "0.4"
+env_logger = "0.11"
+static_cell = "2"
+futures-lite = "2"
+async-signal = "0.2"
+rand = { version = "0.10", default-features = false, features = ["std", "std_rng", "sys_rng", "thread_rng"] }
+# rs-matter's timers on the host: the std time driver and a queue for it
+embassy-time = { version = "0.5", features = ["std"] }
+embassy-time-queue-utils = { version = "0.3", features = ["generic-queue-64"] }
