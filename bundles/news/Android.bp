@@ -1,0 +1,44 @@
+// NewsServiceBundle: the top stories of Hacker News with a summary of each article, published
+// on the topic "news".
+// The module is shaped as vsidlc generates a service bundle (vsidlc --services).
+
+package {
+    default_applicable_licenses: ["Android-Apache-2.0"],
+}
+
+rust_ffi_shared {
+    name: "libeveryware_news_bundle",
+    crate_name: "everyware_news_bundle",
+    srcs: ["src/lib.rs"],
+    defaults: ["sdv_tracing@rust_defaults"],
+    rustlibs: [
+        "libtokio",
+        "libtokio_util",
+        "libanyhow",
+        "libfutures",
+        "libfutures_util",
+        "libsdv_rs",
+        "libsdv_mw_rs_com_everyware_news_service_bundle",
+        "liblog_rust",
+        "libprotobuf",
+        "libeveryware_catalog",
+        "libsdv_status_rs",
+        // the news client (bundles/news/client): Hacker News, the articles' meta tags
+        "libeveryware_news_client",
+        // the last feed and its thumbnails, published at the next start (libs/bundle-store)
+        "libeveryware_bundle_store",
+    ],
+    proc_macros: ["libasync_trait"],
+    apex_available: [
+        "//apex_available:platform",
+        "//apex_available:anyapex",
+    ],
+    // Service bundle packages are /product APEXes.
+    product_specific: true,
+    min_sdk_version: "35",
+    arch: {
+        riscv64: {
+            enabled: false,
+        },
+    },
+}

@@ -1,0 +1,68 @@
+// com.everyware.news: NewsBundle, its manifest and its orchestration config.
+
+package {
+    default_applicable_licenses: ["Android-Apache-2.0"],
+}
+
+apex {
+    name: "com.everyware.news",
+    manifest: "apex_manifest.json",
+    file_contexts: "file_contexts",
+    key: "com.everyware.news.key",
+    prebuilts: [
+        "com.everyware.news.service_bundles_manifest",
+        "com.everyware.news.linker_config",
+        "com.everyware.news.orch",
+        "com.everyware.news.permissions",
+    ],
+    updatable: false,
+    product_specific: true,
+    arch: {
+        arm64: {
+            native_shared_libs: ["libeveryware_news_bundle"],
+        },
+        x86_64: {
+            native_shared_libs: ["libeveryware_news_bundle"],
+        },
+        riscv64: {
+            enabled: false,
+        },
+    },
+}
+
+// Test key, generated for this project. A device that ships signs with its own.
+apex_key {
+    name: "com.everyware.news.key",
+    public_key: "keys/com.everyware.news.avbpubkey",
+    private_key: "keys/com.everyware.news.pem",
+}
+
+prebuilt_etc {
+    name: "com.everyware.news.service_bundles_manifest",
+    src: "sdv_service_bundles_manifest.textproto",
+    filename: "sdv_service_bundles_manifest.textproto",
+    installable: false,
+}
+
+linker_config {
+    name: "com.everyware.news.linker_config",
+    src: "linker.config.json",
+    installable: false,
+}
+
+prebuilt_etc {
+    name: "com.everyware.news.orch",
+    src: "NewsServiceBundleOrchestration.textproto",
+    filename: "NewsServiceBundleOrchestration.textproto",
+    sub_dir: "orch",
+    installable: false,
+}
+
+// The authz policy of the bundle, read by the agents at boot.
+prebuilt_etc {
+    name: "com.everyware.news.permissions",
+    src: "permissions.textproto",
+    sub_dir: "permissions",
+    filename: "news_permissions.textproto",
+    installable: false,
+}
