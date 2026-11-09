@@ -1,0 +1,40 @@
+// Open-Meteo client of the weather bundle: fetch and parse the current conditions and the next
+// 24 hours. A crate of its own so the parsing has a host test without SDV.
+
+package {
+    default_applicable_licenses: ["Android-Apache-2.0"],
+}
+
+rust_defaults {
+    name: "everyware_open_meteo_defaults",
+    crate_name: "everyware_open_meteo",
+    srcs: ["src/lib.rs"],
+    rustlibs: [
+        "liblog_rust",
+        "libserde_json",
+        // HTTPS (libs/https): hyper over tokio-openssl over BoringSSL
+        "libeveryware_https",
+    ],
+}
+
+rust_library {
+    name: "libeveryware_open_meteo",
+    defaults: ["everyware_open_meteo_defaults"],
+    // the weather bundle is a /product APEX
+    product_available: true,
+    apex_available: [
+        "//apex_available:platform",
+        "//apex_available:anyapex",
+    ],
+    arch: {
+        riscv64: {
+            enabled: false,
+        },
+    },
+}
+
+rust_test_host {
+    name: "everyware_open_meteo_test",
+    defaults: ["everyware_open_meteo_defaults"],
+    test_suites: ["general-tests"],
+}

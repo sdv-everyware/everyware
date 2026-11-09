@@ -1,0 +1,68 @@
+// com.everyware.weather: WeatherBundle, its manifest and its orchestration config.
+
+package {
+    default_applicable_licenses: ["Android-Apache-2.0"],
+}
+
+apex {
+    name: "com.everyware.weather",
+    manifest: "apex_manifest.json",
+    file_contexts: "file_contexts",
+    key: "com.everyware.weather.key",
+    prebuilts: [
+        "com.everyware.weather.service_bundles_manifest",
+        "com.everyware.weather.linker_config",
+        "com.everyware.weather.orch",
+        "com.everyware.weather.permissions",
+    ],
+    updatable: false,
+    product_specific: true,
+    arch: {
+        arm64: {
+            native_shared_libs: ["libeveryware_weather_bundle"],
+        },
+        x86_64: {
+            native_shared_libs: ["libeveryware_weather_bundle"],
+        },
+        riscv64: {
+            enabled: false,
+        },
+    },
+}
+
+// Test key, generated for this project. A device that ships signs with its own.
+apex_key {
+    name: "com.everyware.weather.key",
+    public_key: "keys/com.everyware.weather.avbpubkey",
+    private_key: "keys/com.everyware.weather.pem",
+}
+
+prebuilt_etc {
+    name: "com.everyware.weather.service_bundles_manifest",
+    src: "sdv_service_bundles_manifest.textproto",
+    filename: "sdv_service_bundles_manifest.textproto",
+    installable: false,
+}
+
+linker_config {
+    name: "com.everyware.weather.linker_config",
+    src: "linker.config.json",
+    installable: false,
+}
+
+prebuilt_etc {
+    name: "com.everyware.weather.orch",
+    src: "WeatherServiceBundleOrchestration.textproto",
+    filename: "WeatherServiceBundleOrchestration.textproto",
+    sub_dir: "orch",
+    installable: false,
+}
+
+// The authz policy of the bundle, read by the agents at boot.
+prebuilt_etc {
+    name: "com.everyware.weather.permissions",
+    src: "permissions.textproto",
+    sub_dir: "permissions",
+    filename: "weather_permissions.textproto",
+    installable: false,
+}

@@ -1,0 +1,13 @@
+# proto-file:
+# //system/software_defined_vehicle/service_bundles_registry/proto/sdv_service_bundles_manifest.proto
+# proto-message: SdvServiceBundleManifestEntry
+
+sdv_service_bundle_metadata {
+  name: "WeatherServiceBundle"
+  version_number: 1
+  version_name: "1"
+  native_library_path: "lib64/libeveryware_weather_bundle.so"
+  log_tag: "weather_bundle"
+  orchestration_config_path: "etc/orch/WeatherServiceBundleOrchestration.textproto"
+  authorization_policy_path: "etc/permissions/weather_permissions.textproto"
+}

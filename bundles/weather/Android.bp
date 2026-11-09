@@ -1,0 +1,43 @@
+// WeatherServiceBundle: the outdoor weather from Open-Meteo, published on the topic "weather".
+// The module is shaped as vsidlc generates a service bundle (vsidlc --services).
+
+package {
+    default_applicable_licenses: ["Android-Apache-2.0"],
+}
+
+rust_ffi_shared {
+    name: "libeveryware_weather_bundle",
+    crate_name: "everyware_weather_bundle",
+    srcs: ["src/lib.rs"],
+    defaults: ["sdv_tracing@rust_defaults"],
+    rustlibs: [
+        "libtokio",
+        "libtokio_util",
+        "libanyhow",
+        "libfutures",
+        "libfutures_util",
+        "libsdv_rs",
+        "libsdv_mw_rs_com_everyware_weather_service_bundle",
+        "liblog_rust",
+        "libprotobuf",
+        "libeveryware_catalog",
+        "libsdv_status_rs",
+        // the Open-Meteo client, HTTPS on SDV's TLS stack (bundles/weather/open-meteo)
+        "libeveryware_open_meteo",
+        // the last reading, published at the next start (libs/bundle-store)
+        "libeveryware_bundle_store",
+    ],
+    proc_macros: ["libasync_trait"],
+    apex_available: [
+        "//apex_available:platform",
+        "//apex_available:anyapex",
+    ],
+    // Service bundle packages are /product APEXes.
+    product_specific: true,
+    min_sdk_version: "35",
+    arch: {
+        riscv64: {
+            enabled: false,
+        },
+    },
+}
