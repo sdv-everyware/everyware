@@ -1,0 +1,47 @@
+// The weather of the house, as the weather bundle publishes it on the topic "weather"
+// (everyware.vsidl) and the dashboard shows it. Values come from Open-Meteo
+// (bundles/weather/open-meteo); the dashboard never sees the API. Variable fields carry their maximum
+// size: the middleware needs a fixed upper bound per message (vsidlc E511/E513).
+
+syntax = "proto3";
+
+package com.everyware;
+
+import "sdv/vsidl/v1/annotations.proto";
+
+// The current weather at the house and the next 24 hours.
+message Weather {
+    option (.sdv.vsidl.v1.publication) = {
+        // a new reading every ten minutes; the subscribers want the latest one
+        message_count: 4
+        model: MULTI_PUB
+    };
+    // Local time of the reading, "HH:MM".
+    string time = 1 [(.sdv.vsidl.v1.variable_type_max_size) = 8];
+    // Air temperature 2 m above ground, °C.
+    double temperature_c = 2;
+    // Apparent ("feels like") temperature, °C.
+    double apparent_c = 3;
+    // Relative humidity 2 m above ground, %.
+    double humidity_percent = 4;
+    // Wind speed 10 m above ground, km/h.
+    double wind_kmh = 5;
+    // WMO weather interpretation code.
+    uint32 code = 6;
+    // The current hour and the 23 after it.
+    repeated Hour hourly = 7 [(.sdv.vsidl.v1.repeated_field_max_count) = 24];
+    // The place, as the dashboard shows it.
+    string place = 8 [(.sdv.vsidl.v1.variable_type_max_size) = 32];
+}
+
+// One hour of the forecast.
+message Hour {
+    // Local hour of the day, 0..23.
+    uint32 hour = 1;
+    // Air temperature, °C.
+    double temperature_c = 2;
+    // Probability of precipitation, %.
+    double precipitation_percent = 3;
+    // WMO weather interpretation code.
+    uint32 code = 4;
+}

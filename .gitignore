@@ -1,0 +1,4 @@
+.vscode/
+
+# the Figma file key of the current design: local only, never committed
+scripts/figma-key

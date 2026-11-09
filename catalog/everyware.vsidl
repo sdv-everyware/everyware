@@ -1,0 +1,125 @@
+# The bundles of the house and what each publishes, subscribes to or offers.
+# vsidlc generates a crate per bundle with its publisher and subscriber descriptors
+# (generated/Android.bp); the authz policy of a bundle lists the same topics
+# (bundles/<name>/apex/permissions.textproto).
+
+package: "com.everyware"
+
+# Fetches the outdoor weather from the internet and publishes it for the house.
+service_bundle {
+    name: "WeatherServiceBundle"
+
+    publisher {
+        message: "Weather"
+        topic: "weather"
+        capacity: 4
+    }
+}
+
+# Owns the Wi-Fi of the house: talks to wpa_supplicant (its control interface), publishes
+# the networks around and the state of the connection, and offers the WifiService
+# (wifi_service.proto): scan, connect, forget, disconnect, each answered.
+service_bundle {
+    name: "WifiServiceBundle"
+
+    publisher {
+        message: "WifiNetworks"
+        topic: "wifi-networks"
+        capacity: 4
+    }
+
+    publisher {
+        message: "WifiState"
+        topic: "wifi-state"
+        capacity: 4
+    }
+
+    server {
+        service: "WifiService"
+        channel: "wifi"
+    }
+}
+
+# Owns the house's Matter fabric: commissions the devices (by their pairing code), reads what
+# their clusters report and publishes all of them as one message (matter.proto), and offers the
+# MatterService (matter_service.proto): pairing and the devices' commands, each answered.
+service_bundle {
+    name: "MatterServiceBundle"
+
+    publisher {
+        message: "MatterDevices"
+        topic: "matter-devices"
+        capacity: 2
+    }
+
+    server {
+        service: "MatterService"
+        channel: "matter"
+    }
+}
+
+# Fetches the top stories of Hacker News, a summary and a thumbnail of each article, and
+# publishes them for the house.
+service_bundle {
+    name: "NewsServiceBundle"
+
+    publisher {
+        message: "NewsFeed"
+        topic: "news"
+        capacity: 2
+    }
+
+    publisher {
+        message: "NewsThumbnails"
+        topic: "news-thumbnails"
+        capacity: 2
+    }
+}
+
+# The bridge to the screen: subscribes to what the dashboard shows and hands it to the harry
+# process over a local gRPC connection (the harry process is no SDV participant); what the
+# screen asks for (a Wi-Fi command) it calls on the bundle that owns the device and hands
+# the answer back.
+service_bundle {
+    name: "DashboardServiceBundle"
+
+    subscriber {
+        message: "Weather"
+        topic: "weather"
+    }
+
+    subscriber {
+        message: "WifiNetworks"
+        topic: "wifi-networks"
+    }
+
+    subscriber {
+        message: "WifiState"
+        topic: "wifi-state"
+    }
+
+    subscriber {
+        message: "NewsFeed"
+        topic: "news"
+    }
+
+    subscriber {
+        message: "NewsThumbnails"
+        topic: "news-thumbnails"
+    }
+
+    subscriber {
+        message: "MatterDevices"
+        topic: "matter-devices"
+    }
+
+    client {
+        service: "WifiService"
+        channel: "wifi"
+    }
+
+    client {
+        service: "MatterService"
+        channel: "matter"
+    }
+}

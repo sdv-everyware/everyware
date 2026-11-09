@@ -1,0 +1,73 @@
+// The smarthome catalog: the messages the bundles publish and subscribe to (proto) and which
+// bundle does what (vsidl). vsidlc generates the publisher and subscriber descriptors of every
+// bundle from it (generated/, one crate per bundle), as the HAR catalog does
+// (packages/services/display_safety/service/vehicledata).
+
+package {
+    default_applicable_licenses: ["Android-Apache-2.0"],
+}
+
+// The messages, as a Rust crate: the bundles and the dashboard app share it.
+rust_protobuf {
+    name: "libeveryware_catalog",
+    crate_name: "everyware_catalog",
+    protos: ["*.proto"],
+    source_stem: "everyware_catalog_source",
+    proto_flags: [
+        "-I external/protobuf/src",
+        "-I system/software_defined_vehicle/vsidl/language/src/protos",
+    ],
+    rustlibs: ["libvsidl_v1_proto_rs"],
+    host_supported: true,
+    vendor_available: true,
+    product_available: true,
+    apex_available: [
+        "//apex_available:platform",
+        "//apex_available:anyapex",
+    ],
+    min_sdk_version: "29",
+    arch: {
+        riscv64: {
+            enabled: false,
+        },
+    },
+}
+
+filegroup {
+    name: "everyware_catalog_files",
+    srcs: [
+        "*.proto",
+        "*.vsidl",
+        "Android.bp",
+    ],
+}
+
+filegroup {
+    name: "everyware_catalog_protos_only",
+    srcs: ["*.proto"],
+    visibility: ["//vendor/sdv-everyware:__subpackages__"],
+}
+
+// vsidlc over the catalog: a zip with the generated code of every bundle in the vsidl.
+genrule {
+    name: "vsidlc_everyware_catalog_files",
+    srcs: [
+        ":everyware_catalog_files",
+        ":sdv_vsidl_v1_protos",
+        ":everyware_catalog_protos_only",
+    ],
+    tools: [
+        "vsidlc",
+        "soong_zip",
+        "generate_zip_catalog",
+    ],
+    out: ["generated_rs.zip"],
+    cmd: "bash $(location generate_zip_catalog) " +
+        "$(location vsidlc) " +
+        "$(location soong_zip) " +
+        "'$(locations :everyware_catalog_files)' " +
+        "$(genDir) " +
+        "$(out)" +
+        " '$(locations :everyware_catalog_protos_only)'" +
+        " -- --target-api latest",
+}

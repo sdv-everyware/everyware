@@ -1,0 +1,10 @@
+# SELinux domains of the service bundles that do not run in the default one
+# (untrusted_service_bundle). Read at boot by the SDV lifecycle manager
+# (system/software_defined_vehicle/lifecycle_management, selinux_policy_reader.rs):
+#   <package>.<BundleName>   <domain>
+# The Wi-Fi bundle talks to wpa_supplicant's control interface, which no other bundle may
+# (device/rb3/sdv_media_db845c/sepolicy, bundles/wifi/README.md).
+com.everyware.WifiServiceBundle wifi_service_bundle
+# The Matter bundle speaks Matter on the house's network: UDP and mDNS multicast, which the
+# default domain has not (device/rb3/sdv_media_db845c/sepolicy, bundles/matter/README.md).
+com.everyware.MatterServiceBundle matter_service_bundle

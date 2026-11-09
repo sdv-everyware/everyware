@@ -1,0 +1,81 @@
+// The Matter bundle's service: what the house asks it to do with its devices, each call answered
+// when the device has acknowledged it (bundles/matter). What the devices report is a topic
+// (matter.proto); a command with an outcome is an RPC.
+syntax = "proto3";
+
+package com.everyware;
+
+import "sdv/vsidl/v1/annotations.proto";
+
+// The outcome of a command.
+message MatterResult {
+    bool ok = 1;
+    // Why not ("no such node", "the device did not answer", "unsupported attribute").
+    string error = 2 [(.sdv.vsidl.v1.variable_type_max_size) = 96];
+    // Pair: the node id the device got.
+    uint64 node_id = 3;
+}
+
+// Commission a device by its manual pairing code ("3497-011-2332"), found on the network by mDNS.
+message MatterPair {
+    string code = 1 [(.sdv.vsidl.v1.variable_type_max_size) = 32];
+}
+
+message MatterSetOnOff {
+    uint64 node_id = 1;
+    uint32 endpoint = 2;
+    bool on = 3;
+}
+
+message MatterMoveToLevel {
+    uint64 node_id = 1;
+    uint32 endpoint = 2;
+    // 1 to 254.
+    uint32 level = 3;
+    // Tenths of a second; 0 takes the device's own.
+    uint32 transition_ds = 4;
+}
+
+message MatterSetSetpoint {
+    uint64 node_id = 1;
+    uint32 endpoint = 2;
+    // The heating setpoint, else the cooling one.
+    bool heating = 3;
+    float celsius = 4;
+}
+
+message MatterSetSystemMode {
+    uint64 node_id = 1;
+    uint32 endpoint = 2;
+    // "Off", "Auto", "Cool", "Heat".
+    string mode = 3 [(.sdv.vsidl.v1.variable_type_max_size) = 16];
+}
+
+message MatterSetFanMode {
+    uint64 node_id = 1;
+    uint32 endpoint = 2;
+    // "Off", "Low", "Medium", "High", "On", "Auto".
+    string mode = 3 [(.sdv.vsidl.v1.variable_type_max_size) = 16];
+}
+
+// One command, as the screen sends it through the dashboard bundle (which calls the matching rpc).
+message MatterCommand {
+    oneof command {
+        MatterPair pair = 1;
+        MatterSetOnOff set_on_off = 2;
+        MatterMoveToLevel move_to_level = 3;
+        MatterSetSetpoint set_setpoint = 4;
+        MatterSetSystemMode set_system_mode = 5;
+        MatterSetFanMode set_fan_mode = 6;
+    }
+}
+
+service MatterService {
+    // Commissions a device onto the house's fabric (up to a minute).
+    rpc Pair(MatterPair) returns (MatterResult);
+    rpc SetOnOff(MatterSetOnOff) returns (MatterResult);
+    rpc MoveToLevel(MatterMoveToLevel) returns (MatterResult);
+    rpc SetSetpoint(MatterSetSetpoint) returns (MatterResult);
+    rpc SetSystemMode(MatterSetSystemMode) returns (MatterResult);
+    rpc SetFanMode(MatterSetFanMode) returns (MatterResult);
+}

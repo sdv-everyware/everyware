@@ -1,0 +1,27 @@
+// The Wi-Fi bundle's service: what the screen (through the dashboard bundle) asks it to do,
+// each call answered (bundles/wifi). The networks around and the state of the connection
+// are topics (wifi.proto); a command with an outcome is an RPC.
+syntax = "proto3";
+
+package com.everyware;
+
+import "sdv/vsidl/v1/annotations.proto";
+import "wifi.proto";
+
+// The outcome of a command.
+message WifiResult {
+    bool ok = 1;
+    // Why not ("wrong password", "network not found", "enterprise networks need a certificate").
+    string error = 2 [(.sdv.vsidl.v1.variable_type_max_size) = 64];
+}
+
+service WifiService {
+    // Scans and answers with the networks around (also published on wifi-networks).
+    rpc Scan(WifiScan) returns (WifiNetworks);
+    // Joins a network: answers once it is joined or the attempt failed (up to ~30 s).
+    rpc Connect(WifiConnect) returns (WifiResult);
+    // Removes a saved network.
+    rpc Forget(WifiForget) returns (WifiResult);
+    // Leaves the network.
+    rpc Disconnect(WifiDisconnect) returns (WifiResult);
+}

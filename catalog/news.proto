@@ -1,0 +1,53 @@
+// The news of the house, as the news bundle publishes it (bundles/news): the top stories of
+// Hacker News with a summary of each article, and the thumbnails of the stories on a topic of
+// their own (the pictures are larger than the feed; the feed is there before them).
+syntax = "proto3";
+
+package com.everyware;
+
+import "sdv/vsidl/v1/annotations.proto";
+
+message NewsFeed {
+    option (.sdv.vsidl.v1.publication) = {
+        // a new feed every ten minutes; the subscribers want the latest one
+        message_count: 2
+        model: MULTI_PUB
+    };
+    repeated NewsStory stories = 1 [(.sdv.vsidl.v1.repeated_field_max_count) = 10];
+}
+
+message NewsStory {
+    // The story's id at Hacker News; the thumbnail carries the same.
+    uint64 id = 1;
+    string title = 2 [(.sdv.vsidl.v1.variable_type_max_size) = 256];
+    // The host of the article ("example.org"); empty for a story without a link (Ask HN).
+    string site = 3 [(.sdv.vsidl.v1.variable_type_max_size) = 64];
+    string url = 4 [(.sdv.vsidl.v1.variable_type_max_size) = 512];
+    // The article's own description (og:description), cut to a few sentences; may be empty.
+    string summary = 5 [(.sdv.vsidl.v1.variable_type_max_size) = 320];
+    uint32 points = 6;
+    uint32 comments = 7;
+    string by = 8 [(.sdv.vsidl.v1.variable_type_max_size) = 32];
+    // Unix time of the story.
+    int64 time = 9;
+}
+
+// The thumbnails of the stories of a feed, all in one message: a subscriber that comes late
+// gets the last message of a topic (read_on_subscribe), so it gets every picture of the feed.
+message NewsThumbnails {
+    option (.sdv.vsidl.v1.publication) = {
+        // after every feed; the subscribers want the latest one
+        message_count: 2
+        model: MULTI_PUB
+    };
+    repeated NewsThumbnail thumbnails = 1 [(.sdv.vsidl.v1.repeated_field_max_count) = 10];
+}
+// One story's picture.
+message NewsThumbnail {
+    uint64 id = 1;
+    // The picture as the screen shows it: RGB, 3 bytes a pixel, row by row; 120 x 90 (the
+    // image slot of a list item), so the screen has nothing to decode.
+    bytes rgb = 2 [(.sdv.vsidl.v1.variable_type_max_size) = 32400];
+    uint32 width = 3;
+    uint32 height = 4;
+}

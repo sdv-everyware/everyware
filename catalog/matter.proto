@@ -1,0 +1,107 @@
+// The Matter devices of the house, as the Matter bundle reads them (bundles/matter): every node it
+// commissioned, its endpoints and what their clusters report. One message for all of them: a
+// subscriber that comes late gets the last message of a topic (read_on_subscribe), so it gets
+// every device at once.
+syntax = "proto3";
+
+package com.everyware;
+
+import "sdv/vsidl/v1/annotations.proto";
+
+message MatterDevices {
+    option (.sdv.vsidl.v1.publication) = {
+        // after every poll; the subscribers want the latest one
+        message_count: 2
+        model: MULTI_PUB
+    };
+    repeated MatterNode nodes = 1 [(.sdv.vsidl.v1.repeated_field_max_count) = 8];
+}
+
+// A commissioned node (a device on the house's fabric).
+message MatterNode {
+    // The node id on the house's fabric.
+    uint64 node_id = 1;
+    // It answered the last poll.
+    bool online = 2;
+    // Unix time of the last answer.
+    int64 last_seen = 3;
+    // Basic Information.
+    string vendor = 4 [(.sdv.vsidl.v1.variable_type_max_size) = 32];
+    string product = 5 [(.sdv.vsidl.v1.variable_type_max_size) = 32];
+    string serial_number = 6 [(.sdv.vsidl.v1.variable_type_max_size) = 32];
+    string software_version = 7 [(.sdv.vsidl.v1.variable_type_max_size) = 64];
+    uint32 vendor_id = 8;
+    uint32 product_id = 9;
+    // General Diagnostics.
+    uint64 uptime_s = 10;
+    string boot_reason = 11 [(.sdv.vsidl.v1.variable_type_max_size) = 32];
+    repeated MatterEndpoint endpoints = 12 [(.sdv.vsidl.v1.repeated_field_max_count) = 8];
+}
+
+// An endpoint of a node: its device type and the clusters it serves (a cluster the endpoint does
+// not have stays unset).
+message MatterEndpoint {
+    uint32 id = 1;
+    // The Matter device type (0x0100 on/off light, 0x0101 dimmable light, 0x0301 thermostat,
+    // 0x002B fan, 0x0307 humidity sensor).
+    uint32 device_type = 2;
+    MatterThermostat thermostat = 3;
+    MatterHumidity humidity = 4;
+    MatterOnOff on_off = 5;
+    MatterLevel level = 6;
+    MatterFan fan = 7;
+}
+
+message MatterThermostat {
+    // The room's temperature; unknown when the device has no reading.
+    float local_temperature_c = 1;
+    bool local_temperature_known = 2;
+    float heating_setpoint_c = 3;
+    float cooling_setpoint_c = 4;
+    // "Off", "Auto", "Cool", "Heat" ... (the cluster's SystemMode).
+    string system_mode = 5 [(.sdv.vsidl.v1.variable_type_max_size) = 16];
+    // What it does now: "heating", "cooling", "fan", "idle".
+    string running = 6 [(.sdv.vsidl.v1.variable_type_max_size) = 32];
+    float min_heat_setpoint_c = 7;
+    float max_heat_setpoint_c = 8;
+    float min_cool_setpoint_c = 9;
+    float max_cool_setpoint_c = 10;
+}
+
+message MatterHumidity {
+    float percent = 1;
+    bool known = 2;
+}
+
+message MatterOnOff {
+    bool on = 1;
+    // After a power loss: "Off", "On", "Toggle", or "Previous" (the cluster's null).
+    string start_up = 2 [(.sdv.vsidl.v1.variable_type_max_size) = 16];
+}
+
+message MatterLevel {
+    // 1 to 254 (the cluster's CurrentLevel); 0 when unknown.
+    uint32 level = 1;
+    uint32 min_level = 2;
+    uint32 max_level = 3;
+    // On/off transition, tenths of a second.
+    uint32 transition_ds = 4;
+    // The level at power on; 0 means as before (the cluster's null).
+    uint32 start_up_level = 5;
+}
+
+message MatterFan {
+    // "Off", "Low", "Medium", "High", "On", "Auto", "Smart".
+    string mode = 1 [(.sdv.vsidl.v1.variable_type_max_size) = 16];
+    // The modes it offers: "OffLowMedHigh" ...
+    string mode_sequence = 2 [(.sdv.vsidl.v1.variable_type_max_size) = 24];
+    uint32 percent_setting = 3;
+    uint32 percent_current = 4;
+    // "Forward", "Reverse"; empty when the fan has no direction.
+    string airflow_direction = 5 [(.sdv.vsidl.v1.variable_type_max_size) = 16];
+    // The rocking and wind kinds it supports and the ones set ("LeftRight", "SleepWind" ...).
+    string rock_support = 6 [(.sdv.vsidl.v1.variable_type_max_size) = 48];
+    string rock_setting = 7 [(.sdv.vsidl.v1.variable_type_max_size) = 48];
+    string wind_support = 8 [(.sdv.vsidl.v1.variable_type_max_size) = 48];
+    string wind_setting = 9 [(.sdv.vsidl.v1.variable_type_max_size) = 48];
+}
