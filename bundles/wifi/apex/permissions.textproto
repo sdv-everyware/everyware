@@ -1,0 +1,16 @@
+# proto-file: //system/software_defined_vehicle/middleware/service_authz/proto/sdv/authz/policy/authz_policy.proto
+# proto-message: AuthzPolicy
+#
+# What the Wi-Fi bundle may publish and subscribe to (catalog/everyware.vsidl).
+publisher {
+  message: "com.everyware.WifiNetworks"
+  topic: "wifi-networks"
+}
+publisher {
+  message: "com.everyware.WifiState"
+  topic: "wifi-state"
+}
+server {
+  service: "com.everyware.WifiService"
+  channel: "wifi"
+}

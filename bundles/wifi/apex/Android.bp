@@ -1,0 +1,68 @@
+// com.everyware.wifi: WifiBundle, its manifest and its orchestration config.
+
+package {
+    default_applicable_licenses: ["Android-Apache-2.0"],
+}
+
+apex {
+    name: "com.everyware.wifi",
+    manifest: "apex_manifest.json",
+    file_contexts: "file_contexts",
+    key: "com.everyware.wifi.key",
+    prebuilts: [
+        "com.everyware.wifi.service_bundles_manifest",
+        "com.everyware.wifi.linker_config",
+        "com.everyware.wifi.orch",
+        "com.everyware.wifi.permissions",
+    ],
+    updatable: false,
+    product_specific: true,
+    arch: {
+        arm64: {
+            native_shared_libs: ["libeveryware_wifi_bundle"],
+        },
+        x86_64: {
+            native_shared_libs: ["libeveryware_wifi_bundle"],
+        },
+        riscv64: {
+            enabled: false,
+        },
+    },
+}
+
+// Test key, generated for this project. A device that ships signs with its own.
+apex_key {
+    name: "com.everyware.wifi.key",
+    public_key: "keys/com.everyware.wifi.avbpubkey",
+    private_key: "keys/com.everyware.wifi.pem",
+}
+
+prebuilt_etc {
+    name: "com.everyware.wifi.service_bundles_manifest",
+    src: "sdv_service_bundles_manifest.textproto",
+    filename: "sdv_service_bundles_manifest.textproto",
+    installable: false,
+}
+
+linker_config {
+    name: "com.everyware.wifi.linker_config",
+    src: "linker.config.json",
+    installable: false,
+}
+
+prebuilt_etc {
+    name: "com.everyware.wifi.orch",
+    src: "WifiServiceBundleOrchestration.textproto",
+    filename: "WifiServiceBundleOrchestration.textproto",
+    sub_dir: "orch",
+    installable: false,
+}
+
+// The authz policy of the bundle, read by the agents at boot.
+prebuilt_etc {
+    name: "com.everyware.wifi.permissions",
+    src: "permissions.textproto",
+    sub_dir: "permissions",
+    filename: "wifi_permissions.textproto",
+    installable: false,
+}
