@@ -20,6 +20,7 @@ log() { /vendor/bin/log -t everyware_browser "$*"; }
 
 [ -x $R/usr/bin/cog ] || { log "no Debian root with Cog at $R: no browser"; exit 0; }
 grep -q '^browser:' $R/etc/passwd || { log "the Debian root has no user browser: no browser"; exit 0; }
+[ -d $R/home/browser ] || { log "the Debian root has no /home/browser: no browser"; exit 0; }
 
 export GLIBC_ROOT=$R HAR_SOCKET_DIR=$RUN HAR_BROWSER_LIB=/vendor/etc/everyware/browser
 # as the browser's user inside the root, with the environment given as arguments
@@ -41,6 +42,9 @@ while :; do
     # the panel made the socket for itself; the browser's group has to reach it
     chown root:$BROWSER_ID $RUN/har-display
     chmod 0660 $RUN/har-display
+    # which socket this is: a panel that restarts makes a new one under the same name, and
+    # Cog stays alive on the old one
+    socket=$(stat -c %i $RUN/har-display)
     # made once and kept: the panel opens the events FIFO one time and reads that file for as
     # long as it runs, so a new one in its place would never be read
     for f in $RUN/har-browser-open $RUN/har-browser-events; do
@@ -70,7 +74,7 @@ while :; do
     fi
 
     while kill -0 $bus 2>/dev/null && kill -0 $cog 2>/dev/null && kill -0 $relay 2>/dev/null \
-        && [ -S $RUN/har-display ]; do
+        && [ "$(stat -c %i $RUN/har-display 2>/dev/null)" = "$socket" ]; do
         sleep 2
     done
     log "a part of the browser ended or the panel's socket went: starting it again"

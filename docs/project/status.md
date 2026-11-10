@@ -14,7 +14,6 @@ repositories of the project.
 | the smart home panel | RB3 | `smarthome-app` as the vendor APEX `com.everyware.smarthome`, started by init |
 | Wayland zones and the browser | RB3 | harry serves Wayland clients in zones of the design, also on a hardware plane; a tap on a news story opens its page in Cog, started by the image when the device has the Debian root ([a browser on the panel](browser.md)) |
 | the apps on the UI library | RB3 | `tv-app` (first frame 2.2 s after start, 7 to 8 ms per frame), `hub-app`, `pairs-app`; the design document is `<name>.dcf`, opened by name |
-| the service bundles | build | `weather`, `news`, `wifi`, `matter` (rs-matter on the crates of `third_party-rust`), `dashboard` |
 | the design path without Figma | host | a `.fig` written by the kiwi tools, `fig-to-dcf.sh` to the `.dcf` the app ships, `dcf-diff` against Figma's own import: equal |
 
 ## Missing

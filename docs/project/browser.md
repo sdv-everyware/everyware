@@ -48,7 +48,7 @@ init: apex.all.ready -> mkdir /data/vendor/everyware/run (0750 root:2900) -> sta
    the panel serves har-display there (init.smarthome.rc of smarthome-app's APEX)
 init: smarthome running -> start everyware_browser (product/everyware_browser.rc)
    everyware-browser.sh: no root on the device -> ends
-                         else: the socket and two new FIFOs for the group 2900, then in the
+                         else: the socket and the two FIFOs for the group 2900, then in the
                          root as the user browser: the bus, Cog, the relay; when one of them
                          ends or the panel restarts, all three are started again
 ```

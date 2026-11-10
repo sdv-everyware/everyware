@@ -14,6 +14,9 @@
 # WAYLAND_DISPLAY=har-display.
 # DNS: the Wi-Fi DHCP lease (vendor.net.wlan0.dns*), as Android's own resolver has no glibc side.
 set -e
+# init starts a service with umask 077: the directories, the device nodes' parents and
+# resolv.conf made here are for the root's users too
+umask 022
 R=${GLIBC_ROOT:-/data/glibc/rootfs}
 SOCKDIR=${HAR_SOCKET_DIR:-/data/local/tmp}
 
@@ -41,6 +44,8 @@ mounted "$R/dev" || mount -t tmpfs -o mode=0755,nosuid,noexec tmpfs "$R/dev"
 # card0: WebKit lists DRM devices by their nodes and wants the primary one to exist; its mode
 # (0660, root in here) keeps the browser from opening it, as on the host.
 for n in null zero full random urandom tty dri/renderD128 dri/card0; do node "$n"; done
+# also where an earlier entry made it under another umask: the browser has to reach renderD128
+chmod 0755 "$R/dev/dri"
 for l in fd:/proc/self/fd stdin:/proc/self/fd/0 stdout:/proc/self/fd/1 stderr:/proc/self/fd/2 ptmx:pts/ptmx; do
     [ -L "$R/dev/${l%%:*}" ] || ln -s "${l#*:}" "$R/dev/${l%%:*}"
 done
