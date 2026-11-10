@@ -52,7 +52,7 @@ flowchart LR
   end
   IN[".fig in"] --> RT
   L & P & A -->|patch| RT
-  RT --> OUT[".fig out<br/>the project's design/build/<br/>(not in git)"]
+  RT --> OUT[".fig out<br/>an app's design/&lt;app&gt;.fig (in git),<br/>the Library's design/build/"]
   OUT --> CK
   OUT --> FJ --> DCF["scripts/fig-to-dcf.sh<br/>(DesignCompose importer)"] --> D[".dcf in the app's data/"]
   OUT -.->|optional: the designer opens it| FIG["Figma"]
@@ -76,7 +76,7 @@ Where the designs are:
 |---|---|---|
 | The Library | `vendor/sdv-everyware/ui-lib/design` | `build-library.sh` → `design/build/library.fig` |
 | The panel (smarthome-app) | `utils/smarthome-app/design` | `build.sh` → `design/build/smarthome.fig` (`--dcf`: and `data/smarthome.dcf`) |
-| An app (hub, tv, pairs, a new one) | `utils/<app>-app/design` | `build.sh` → the Library, then `design/build/<app>.fig` and `data/<app>.dcf` |
+| An app (hub, tv, pairs, a new one) | `utils/<app>-app/design` | `build.sh` → the Library, then `design/<app>.fig` (in git, the designer's file) and `data/<app>.dcf` |
 
 ## How a .fig is built
 
@@ -85,16 +85,16 @@ flowchart TB
   X["smarthome-app/design/source/<br/>Smart HOme.fig (the designer's export)"]
   X -->|"empty-patch.js, once<br/>build-library.sh --base"| B["ui-lib/design/library-base.fig<br/>pages + icon sources"]
   B -->|components-patch.js| LIB["ui-lib design/build/library.fig"]
-  LIB -->|"&lt;app&gt;-patch.js"| AL["&lt;app&gt; light .fig"] -->|dark-theme-patch.js| AF["&lt;app&gt;-app design/build/&lt;app&gt;.fig"] -->|fig-to-dcf.sh| AD["data/&lt;app&gt;.dcf"]
+  LIB -->|"&lt;app&gt;-patch.js"| AL["&lt;app&gt; light .fig"] -->|dark-theme-patch.js| AF["&lt;app&gt;-app design/&lt;app&gt;.fig"] -->|fig-to-dcf.sh| AD["data/&lt;app&gt;.dcf"]
   X -->|components-patch.js| P1 -->|"keyboard, dashboard, screens,<br/>sheet, panel, prototype"| PF["smarthome-app design/build/smarthome.fig"]
   P1["panel steps<br/>(smarthome-app design/build.sh)"]
 ```
 
 Every patch arrow is one `node roundtrip.js <in.fig> <out.fig> <patch.js>`; a project's
 `design/build.sh` runs its chain. What goes in is in git (the patches, `library-base.fig`, the
-designer's export); what comes out is in the project's `design/build/`, ignored by git and
-written again on every build (a build is deterministic, so the same commit gives the same
-bytes). Only the `.dcf` an app loads is committed, as DesignCompose apps do. The Library is built on an empty document, so an app's file carries no
+designer's export); an app's result is its `design/<app>.fig` in git, the intermediates are in `design/build/`, ignored by git and
+written again on every build (the content is deterministic: the same sources give the same
+design; only the archive's timestamp differs, so git shows the `.fig` as changed after a build). An app commits the `.dcf` it loads, as DesignCompose apps do, and the `.fig` a designer opens. The Library is built on an empty document, so an app's file carries no
 other app's screen. The panel is built on the designer's drawing, which its patches turn into
 slots and named texts.
 
@@ -197,7 +197,7 @@ U=packages/services/display_safety/utils
 # an app: the Library, the app's .fig and its .dcf in one step (CHECK: names that must be in it)
 CHECK='#pairs/time #pairs/cards' $U/pairs-app/design/build.sh
 #   -> vendor/sdv-everyware/ui-lib/design/build/library.fig
-#   -> $U/pairs-app/design/build/pairs.fig      (open in Figma to look at it)
+#   -> $U/pairs-app/design/pairs.fig      (open in Figma to look at it)
 #   -> $U/pairs-app/data/pairs.dcf              (committed, the app loads it)
 
 # the Library alone (after a change of components.json or components-patch.js)
@@ -209,7 +209,7 @@ $FIGMA/check-figma.sh $U/smarthome-app/design/build/smarthome.fig     # read onl
 
 # one step by hand, or a .fig as JSON to look at it or compare two builds
 node $FIGMA/roundtrip.js <in.fig> <out.fig> <patch.js>
-node $FIGMA/fig2json.js $U/pairs-app/design/build/pairs.fig /tmp/pairs-json    # /tmp/pairs-json/file.json
+node $FIGMA/fig2json.js $U/pairs-app/design/pairs.fig /tmp/pairs-json    # /tmp/pairs-json/file.json
 ```
 
 `check-figma.sh` prints `library: <n> sets, <n> problems`, `contract: ...` and the prototype's
