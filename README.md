@@ -38,6 +38,7 @@ services and connect them, and **harry**, a renderer that draws a Figma design s
 display at a stable frame rate. It exists so that an instrument cluster boots in seconds and keeps
 drawing even when the rest of the car has a bad day. The safety monitoring that watches a cluster's
 telltales stays off here: a wall panel is not a cluster, and harry without it is a very good renderer.
+Everything you write for it, the services and the app behind the screen, is Rust.
 
 SDV comes in two flavours: SDV Media for a device with a screen, SDV Core, the same services
 without graphics, for one without. The panel uses SDV Media; a hub or a sensor would use SDV Core.
