@@ -3,7 +3,8 @@
 EveryWare is SDV Media for embedded devices that are not a car: a smart-home panel first. It
 lives in the AOSP tree as several git repositories; this one, `everyware`, is
 the platform side (service bundles, the catalog, docs, the Figma tools). Paths below are from
-the tree's top.
+the tree's top. The manifest links this file to the tree's top as `AGENTS.md` and `CLAUDE.md`,
+so an agent opened on the tree reads it first.
 
 Read this file, then the `AGENTS.md` nearest to your change, then the skill for your task.
 
@@ -37,8 +38,8 @@ Each is a `SKILL.md` with the steps; load the one whose "use when" fits.
 | `harry-app` | `packages/services/display_safety/utils/smarthome-app/skills/harry-app` | writing, building, running or debugging a harry app |
 | `review` | `vendor/sdv-everyware/everyware/skills/review` | a feature branch is ready: the review by another agent, before the user looks |
 
-More to read: `docs/README.md` (the platform, page by page), `design/figma/README.md` (designs
-as code), `vendor/sdv-everyware/ui-lib/design/WORKFLOW.md` (agents and designers on one
+More to read: `vendor/sdv-everyware/everyware/docs/README.md` (the platform, page by page),
+`vendor/sdv-everyware/everyware/design/figma/README.md` (designs as code), `vendor/sdv-everyware/ui-lib/design/WORKFLOW.md` (agents and designers on one
 Library), `vendor/sdv-everyware/ui-lib/docs/llms.txt` (the library's rules).
 
 ## How a change lands
@@ -54,7 +55,7 @@ the user asks ──► 1 a branch feature/<name> in every repository the change
               ──► 6 the user looks and says "land it" ──► merged into main, branch deleted
 ```
 
-`scripts/feature.sh` does the mechanical part in every repository the change touches:
+`vendor/sdv-everyware/everyware/scripts/feature.sh` does the mechanical part in every repository the change touches:
 
 ```bash
 FS=vendor/sdv-everyware/everyware/scripts/feature.sh
@@ -91,7 +92,7 @@ commit that does not come from `feature.sh land`, however it is made (a merge, a
 cherry-pick, a revert, a reset, `branch -f`, a push into the repository).
 
 - **Which hooks are in force:** `main`'s version, copied into each repository's `.git/hooks` by
-  `scripts/setup-agents.sh` (a new repository, whose `main` has none yet, gets its own files).
+  `vendor/sdv-everyware/everyware/scripts/setup-agents.sh` (a new repository, whose `main` has none yet, gets its own files).
   So they are the same on every branch, also one without hook files, and a change of a hook
   takes effect when it landed, not while it is on a branch.
 - **What they do not hold:** the deletion of `main`, which git cannot tell from packing the refs;
@@ -109,7 +110,7 @@ cherry-pick, a revert, a reset, `branch -f`, a push into the repository).
 - **What no script here can know:** whether the reviewer was another agent, and whether the user
   said "land it". Both are rules.
 
-`scripts/test-feature.sh` tries the rules of the scripts and the hooks case by case in a
+`vendor/sdv-everyware/everyware/scripts/test-feature.sh` tries the rules of the scripts and the hooks case by case in a
 throwaway tree, and what must keep working under the hooks (git gc, a rebase, a stash).
 
 ## Rules for every change
@@ -151,6 +152,6 @@ The hooks in `scripts/git-hooks/` of each repository check the branch, the autho
 strings and the attribution: a commit that breaks them is refused. The private words of the
 person (a user id, a work address) are not in the hook but in `~/.config/everyware/private-words`,
 outside git, one extended regex per line; `setup-agents.sh` writes the empty file, the person
-fills it. `scripts/setup-agents.sh`
+fills it. `vendor/sdv-everyware/everyware/scripts/setup-agents.sh`
 installs the hooks in every repository of the project (once per checkout, and after a hook
 changed; `feature.sh land` does that, `feature.sh status` says when a copy is old).
