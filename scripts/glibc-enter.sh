@@ -9,10 +9,14 @@
 #   sh /data/glibc/glibc-enter.sh apt-get install -y cog
 #   sh /data/glibc/glibc-enter.sh cog --platform=wl https://example.org
 #
-# Inside: XDG_RUNTIME_DIR=/run/har is the master's socket directory (/data/local/tmp, where
-# smarthome_zone --wayland-zones listens as har-display), WAYLAND_DISPLAY=har-display.
+# Inside: XDG_RUNTIME_DIR=/run/har is the master's socket directory (HAR_SOCKET_DIR; without
+# it /data/local/tmp, where a developer's build of the panel listens as har-display),
+# WAYLAND_DISPLAY=har-display.
 # DNS: the Wi-Fi DHCP lease (vendor.net.wlan0.dns*), as Android's own resolver has no glibc side.
 set -e
+# init starts a service with umask 077: the directories, the device nodes' parents and
+# resolv.conf made here are for the root's users too
+umask 022
 R=${GLIBC_ROOT:-/data/glibc/rootfs}
 SOCKDIR=${HAR_SOCKET_DIR:-/data/local/tmp}
 
@@ -40,6 +44,8 @@ mounted "$R/dev" || mount -t tmpfs -o mode=0755,nosuid,noexec tmpfs "$R/dev"
 # card0: WebKit lists DRM devices by their nodes and wants the primary one to exist; its mode
 # (0660, root in here) keeps the browser from opening it, as on the host.
 for n in null zero full random urandom tty dri/renderD128 dri/card0; do node "$n"; done
+# also where an earlier entry made it under another umask: the browser has to reach renderD128
+chmod 0755 "$R/dev/dri"
 for l in fd:/proc/self/fd stdin:/proc/self/fd/0 stdout:/proc/self/fd/1 stderr:/proc/self/fd/2 ptmx:pts/ptmx; do
     [ -L "$R/dev/${l%%:*}" ] || ln -s "${l#*:}" "$R/dev/${l%%:*}"
 done
@@ -49,13 +55,20 @@ mounted "$R/dev/pts" || mount -t devpts -o newinstance,ptmxmode=0666 devpts "$R/
 mounted "$R/dev/shm" || { mkdir -p "$R/dev/shm"; mount -t tmpfs -o mode=1777 tmpfs "$R/dev/shm"; }
 mounted "$R/tmp" || mount -t tmpfs -o mode=1777 tmpfs "$R/tmp"
 bind "$SOCKDIR" "$R/run/har"
+# the browser's helper scripts from the image (everyware-browser.sh), read by the root's shell
+[ -n "$HAR_BROWSER_LIB" ] && bind "$HAR_BROWSER_LIB" "$R/usr/local/lib/har-browser"
 
-: > "$R/etc/resolv.conf"
+# written beside and moved in place: two callers may enter at the same time
+resolv="$R/etc/resolv.conf.$$"
+: > "$resolv"
 for n in 1 2 3 4; do
-  d=$(getprop vendor.net.wlan0.dns$n)
-  [ -n "$d" ] && echo "nameserver $d" >> "$R/etc/resolv.conf"
+  # by its path: a vendor shell (init's service) has only /vendor/bin on its PATH, and there
+  # is no getprop there
+  d=$(/system/bin/getprop vendor.net.wlan0.dns$n) || d=
+  [ -n "$d" ] && echo "nameserver $d" >> "$resolv"
 done
-[ -s "$R/etc/resolv.conf" ] || echo "nameserver 8.8.8.8" > "$R/etc/resolv.conf"
+[ -s "$resolv" ] || echo "nameserver 8.8.8.8" > "$resolv"
+mv "$resolv" "$R/etc/resolv.conf"
 
 [ $# -gt 0 ] || set -- /bin/bash -l
 exec chroot "$R" /usr/bin/env -i \
