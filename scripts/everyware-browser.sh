@@ -43,8 +43,10 @@ while :; do
     chown root:$BROWSER_ID $RUN/har-display
     chmod 0660 $RUN/har-display
     # which socket this is: a panel that restarts makes a new one under the same name, and
-    # Cog stays alive on the old one
-    socket=$(stat -c %i $RUN/har-display)
+    # Cog stays alive on the old one. The inode number alone is not enough: the file system
+    # gives a new file the number of the one just removed. Read after the chown and chmod
+    # above, which change the time themselves.
+    socket=$(stat -c '%i %z' $RUN/har-display) || continue
     # made once and kept: the panel opens the events FIFO one time and reads that file for as
     # long as it runs, so a new one in its place would never be read
     for f in $RUN/har-browser-open $RUN/har-browser-events; do
@@ -74,7 +76,7 @@ while :; do
     fi
 
     while kill -0 $bus 2>/dev/null && kill -0 $cog 2>/dev/null && kill -0 $relay 2>/dev/null \
-        && [ "$(stat -c %i $RUN/har-display 2>/dev/null)" = "$socket" ]; do
+        && [ "$(stat -c '%i %z' $RUN/har-display 2>/dev/null)" = "$socket" ]; do
         sleep 2
     done
     log "a part of the browser ended or the panel's socket went: starting it again"
