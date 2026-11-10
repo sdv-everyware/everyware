@@ -6,7 +6,7 @@
 
 <p align="center">
   <b>Google's SDV Media on every embedded device, with and without a screen.</b><br>
-  Not a new OS: Google's <a href="https://source.android.com/docs/automotive/sdv">AAOS SDV</a> taken out of the car, the cluster's safety monitoring off, a smart home's services on. Android without Java.
+  Not a new OS: Google's <a href="https://source.android.com/docs/automotive/sdv">AAOS SDV</a> taken out of the car, a smart home's services on. Android without Java.
   A delightfully fast boot. A Figma design as the screen. Services and UI in Rust. Updatable for years.
 </p>
 
@@ -33,12 +33,11 @@ year.
 
 Google built a third option for cars. **SDV Media** is the Android of the software defined
 vehicle: the Linux kernel, init, SELinux, verified boot and APEX updates of Android, but no Java
-framework, no app store, no SurfaceFlinger. In its place a handful of small native agents that run
-services and connect them, and **harry**, a renderer that draws a Figma design straight to the
+framework, no app store, no SurfaceFlinger. In its place a handful of small native agents, written
+in Rust, that run services and connect them, and **harry**, a renderer in Rust that draws a Figma design straight to the
 display at a stable frame rate. It exists so that an instrument cluster boots in seconds and keeps
 drawing even when the rest of the car has a bad day. The safety monitoring that watches a cluster's
 telltales stays off here: a wall panel is not a cluster, and harry without it is a very good renderer.
-Everything you write for it, the services and the app behind the screen, is Rust.
 
 SDV comes in two flavours: SDV Media for a device with a screen, SDV Core, the same services
 without graphics, for one without. The panel uses SDV Media; a hub or a sensor would use SDV Core.
