@@ -47,7 +47,8 @@ infotainment screen. Here it runs on bare metal: the only system on the board, s
 kernel and the hardware, nothing between it and the display.
 
 Nothing in it is specific to cars. SDV EveryWare takes it out of the car and puts it on the wall.
-It writes no operating system: SDV Media comes from AOSP unchanged, and this project adds what a
+It writes no operating system: SDV Media comes from AOSP as it is, harry with the commits a touch
+panel needs, and this project adds what a
 house needs on top of it. A device product for the board, the service bundles (weather, news,
 Wi-Fi, Matter), a UI library, the tools from Figma to the screen, and the documentation.
 
@@ -102,7 +103,8 @@ lights and the thermostat you already own. SDV devices join the mesh.
 **Android's security and updates, without Android's size**<br>
 SELinux, verified boot, a DICE identity per device, access lists checked on every call. A/B
 system updates and staged APEX updates with automatic rollback, the path Android itself takes.
-Our own APEXes are not marked updatable yet; see the status.
+Not finished: SELinux is still permissive, the identity comes from test files, our own APEXes are
+not marked updatable yet ([6. Security](docs/concepts/6-security.md), [10. Updating the system](docs/concepts/10-updating-the-system.md)).
 
 </td>
 <td valign="top">
@@ -132,7 +134,7 @@ The same UI library, three apps, captured on the reference board (1920 x 1080 ov
 
 <p align="center">
   <img src="docs/assets/dashboard-design-v1.png" alt="The panel's design in Figma" width="700"><br>
-  <sub>The panel as the designer sees it in Figma. The image at the top of this page is the same design, drawn by harry.</sub>
+  <sub>An earlier design of the panel in Figma. The screen at the top of this page is <code>smarthome-app</code>; it reaches the public tree with <a href="https://github.com/sdv-everyware/everyware/issues/14">#14</a>, its camera tile is a picture from the design until the camera stream exists (<a href="https://github.com/sdv-everyware/everyware/issues/44">#44</a>).</sub>
 </p>
 
 ## How it works
@@ -161,22 +163,23 @@ network, the product makefile); everything above it is the same.
 |---|---|---|
 | Qualcomm Robotics RB3 (DB845c) | the reference board: every change is measured here first | boots, draws, touch; the bundles are being added to the product |
 | Cuttlefish (the Android emulator) | development without hardware, continuous builds | planned, [issue #18](https://github.com/sdv-everyware/everyware/issues/18) |
-| Raspberry Pi | the cheap board on the wall | planned |
+| Raspberry Pi | the cheap board on the wall | planned, [issue #46](https://github.com/sdv-everyware/everyware/issues/46) |
 
 ## The project
 
 SDV EveryWare is a set of repositories in this organisation, checked out into the public AOSP
 tree by the local manifest in [`manifest`](https://github.com/sdv-everyware/manifest). The
-branch names follow the AOSP release (`everyware-17.0.0_r1`); a new AOSP release gets a new branch.
+manifest and the two forks of Google's and Linaro's repositories carry a branch per AOSP release
+(`everyware-17.0.0_r1`); our own repositories live on `main`.
 
 | Repository | Path in the tree | What it holds |
 |---|---|---|
 | [`everyware`](https://github.com/sdv-everyware/everyware) (this one) | `vendor/sdv-everyware/everyware` | the service bundles, their catalog and policies, the product additions, the design tools, the documentation |
 | [`ui-lib`](https://github.com/sdv-everyware/ui-lib) | `vendor/sdv-everyware/ui-lib` | the UI library: components by role, their behaviour, the Library as a Figma file and as a `.dcf` |
-| [`smarthome-app`](https://github.com/sdv-everyware/smarthome-app), [`tv-app`](https://github.com/sdv-everyware/tv-app), [`hub-app`](https://github.com/sdv-everyware/hub-app), [`pairs-app`](https://github.com/sdv-everyware/pairs-app) | `packages/services/display_safety/utils/<name>` | the apps on harry; `tv-app` is the reference app of the library |
+| [`smarthome-app`](https://github.com/sdv-everyware/smarthome-app), [`tv-app`](https://github.com/sdv-everyware/tv-app), [`hub-app`](https://github.com/sdv-everyware/hub-app), [`pairs-app`](https://github.com/sdv-everyware/pairs-app) | `packages/services/display_safety/utils/<name>` | the apps on harry; `tv-app` is the reference app of the library; `smarthome-app` arrives with [#14](https://github.com/sdv-everyware/everyware/issues/14) |
 | [`super-harry`](https://github.com/sdv-everyware/super-harry) | `packages/services/display_safety` | harry as AOSP has it, plus the commits a 1080p touch panel needs |
 | [`device-rb3`](https://github.com/sdv-everyware/device-rb3) | `device/rb3/sdv_media_db845c` | the product of the reference board: SDV Media's core, the display, the network, the bundles. A new target is a repository like this one |
-| [`dragonboard`](https://github.com/sdv-everyware/dragonboard) | `device/linaro/dragonboard` | Linaro's support for the reference board, with one policy change |
+| [`dragonboard`](https://github.com/sdv-everyware/dragonboard) | `device/linaro/dragonboard` | Linaro's support for the reference board, with one policy change (being published, [#16](https://github.com/sdv-everyware/everyware/issues/16)) |
 | [`dnsproxyd`](https://github.com/sdv-everyware/dnsproxyd) | `vendor/sdv-everyware/dnsproxyd` | name resolution for a device without netd |
 | [`third_party-rust`](https://github.com/sdv-everyware/third_party-rust), [`third_party-chrony`](https://github.com/sdv-everyware/third_party-chrony) | `vendor/sdv-everyware/third_party/{rust,chrony}` | the Rust crates the tree lacks (rs-matter, tokio-openssl), chrony |
 | [`automotive-design-compose`](https://github.com/sdv-everyware/automotive-design-compose) | (host tools only) | our fork of DesignCompose: the importer behind the design tools |
@@ -192,7 +195,7 @@ branch names follow the AOSP release (`everyware-17.0.0_r1`); a new AOSP release
 | `design/figma/` | the kiwi tools: a Figma file written and read without Figma, the roundtrip, `fig2json` |
 | `tools/` | `dcf` (a `.dcf` from Figma or from a `.fig`, the node by node comparison), `matter-generator` (a virtual Matter device on the laptop), `boot-time` (power on to the first frame, measured) |
 | `scripts/` | the design path (`fetch-dcf.sh`, `fig-to-dcf.sh`), the board (`deploy-bundle-rb3.sh`, `run-smarthome-rb3.sh`), the process (`feature.sh`, the git hooks) |
-| `skills/` | step by step instructions for an agent: a service bundle, a Figma design, a harry app |
+| `skills/` | step by step instructions for an agent: a service bundle, a Figma design, the review of a branch (the UI library and the apps have theirs in `ui-lib/skills`) |
 | `docs/` | the concepts, the solution, the decisions and the status |
 
 ## Get started
@@ -224,8 +227,8 @@ the app template has its own repository.
 Built from the public tree at `android-17.0.0_r1`; the reference board boots the image, harry
 draws with touch, the three apps run, the five bundles build, the design path works without Figma. The A/B
 update path is in the image and running; our APEXes are not updatable on their own yet and the
-image is signed with test keys. Details in
-[`docs/project/status.md`](docs/project/status.md).
+image is signed with test keys. Details in [`docs/project/status.md`](docs/project/status.md) and
+[10. Updating the system](docs/concepts/10-updating-the-system.md).
 
 What comes next is tracked as [issues](https://github.com/sdv-everyware/everyware/issues), each
 with the problem it solves and the alternatives considered: the bundles in the product, the smart home panel on the public tree, the emulator

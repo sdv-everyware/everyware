@@ -103,7 +103,9 @@
   <line x1="862" y1="335" x2="898" y2="335" stroke="#8a93a3" stroke-width="2" marker-start="url(#a)" marker-end="url(#a)"/>
   <!-- legend -->
   <rect x="340" y="628" width="14" height="14" rx="3" fill="#2563EB"/>
-  <text x="362" y="640" class="g gs">EveryWare: the UI library, the apps, the bundles, the design tools, the device product</text>
+  <rect x="358" y="628" width="14" height="14" rx="3" fill="#7C3AED"/>
+  <text x="380" y="640" class="g gs">EveryWare: the design and the UI library, the apps, the bundles, the device product</text>
   <rect x="340" y="652" width="14" height="14" rx="3" fill="#64748B"/>
-  <text x="362" y="664" class="g gs">AOSP as Google ships it: harry, the SDV agents, the Android core</text>
+  <rect x="358" y="652" width="14" height="14" rx="3" fill="#1E293B"/>
+  <text x="380" y="664" class="g gs">AOSP and the board: harry (plus the panel's commits), the SDV agents, the Android core, the hardware</text>
 </svg>

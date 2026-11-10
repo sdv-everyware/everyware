@@ -77,7 +77,7 @@ Before that change, the same day:
 | **average** | 0.56 | 5.78 | 5.71 | **8.43** | 7.87 |
 
 2026-10-30, HAR's own harry on the same board, for comparison (its splash's first frame;
-`~/Notes/notes/SDV/blog-rb3/boot-time.md`):
+measured the same way, three boots):
 
 | | boot completed | the app starts | first frame |
 |---|---|---|---|
