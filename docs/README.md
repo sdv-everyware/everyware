@@ -45,8 +45,7 @@ Every concept page links the pages for its topic under "Official documentation".
 ## Guides and code
 
 - The smarthome app and how to write a harry app, step by step:
-  `packages/services/display_safety/utils/smarthome-app` (`docs/harry-app-anatomy.md`,
-  `skills/harry-app/`).
+  `packages/services/display_safety/utils/smarthome-app` (`docs/harry-app-anatomy.md`).
 - Adding a service bundle (catalog, vsidlc, APEX, deploy), as Android Studio for Platform
   does it: `skills/service-bundle/SKILL.md` (traps: `skills/service-bundle/traps.md`).
 - The UI component library and how to add a component: `vendor/sdv-everyware/ui-lib`

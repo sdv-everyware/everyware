@@ -173,7 +173,7 @@ So for people, outside `#smarthome-root` on Page 1, in a row below the dashboard
    trade-offs and wait for the choice before building; report the final layout as ASCII.
 4. After the user's import and fetch, or after fig-to-dcf.sh: `everyware_ui_test` checks the
    contract against the app's `smarthome.dcf` (ui-component skill); the app's code for the new
-   names is the harry-app skill. A new EveryWare app with its own root is the new-app skill
+   names is the use-component skill (ui-lib/skills/use-component). A new EveryWare app with its own root is the new-app skill
    (ui-lib/skills/new-app), which runs this chain for that app.
 
 Traps: [traps.md](traps.md). Components: the ui-component skill (ui-lib/skills/ui-component).

@@ -13,7 +13,7 @@ Read this file, then the `AGENTS.md` nearest to your change, then the skill for 
 | Repository | What it is | Its guide |
 |---|---|---|
 | `vendor/sdv-everyware/everyware` | service bundles, the catalog, the product, the docs (`docs/`), the Figma tools (`design/figma/`), scripts | this file |
-| `vendor/sdv-everyware/ui-lib` | the UI library: components and nothing else | `ui-lib/AGENTS.md` |
+| `vendor/sdv-everyware/ui-lib` | the UI library: components and nothing else | `vendor/sdv-everyware/ui-lib/AGENTS.md` |
 | `packages/services/display_safety/utils/<name>-app` | one app each (smarthome, hub, tv, pairs, ...): its code, its design, its content | the app's `AGENTS.md` |
 | `vendor/sdv-everyware/third_party/rust` | vendored Rust crates (rs-matter) | |
 | `vendor/sdv-everyware/dnsproxyd` | the DNS proxy for the bundles | |
@@ -35,12 +35,13 @@ Each is a `SKILL.md` with the steps; load the one whose "use when" fits.
 | `sheet` | `vendor/sdv-everyware/ui-lib/skills/sheet` | a sheet, a dialog or a side panel over the screen |
 | `figma-design` | `vendor/sdv-everyware/everyware/skills/figma-design` | a screen, a sheet or the designer's prototype of the panel |
 | `service-bundle` | `vendor/sdv-everyware/everyware/skills/service-bundle` | a new SDV service bundle (publisher, subscriber, RPC, a bridge to the screen) |
-| `harry-app` | `packages/services/display_safety/utils/smarthome-app/skills/harry-app` | writing, building, running or debugging a harry app |
 | `review` | `vendor/sdv-everyware/everyware/skills/review` | a feature branch is ready: the review by another agent, before the user looks |
 
 More to read: `vendor/sdv-everyware/everyware/docs/README.md` (the platform, page by page),
 `vendor/sdv-everyware/everyware/design/figma/README.md` (designs as code), `vendor/sdv-everyware/ui-lib/design/WORKFLOW.md` (agents and designers on one
-Library), `vendor/sdv-everyware/ui-lib/docs/llms.txt` (the library's rules).
+Library), `vendor/sdv-everyware/ui-lib/docs/llms.txt` (the library's rules),
+`packages/services/display_safety/utils/smarthome-app/docs/harry-app-anatomy.md` (a harry app,
+from the Figma layer to the frame).
 
 ## How a change lands
 
@@ -132,7 +133,7 @@ Working with the user:
 In the code:
 
 - **Production, not workarounds:** remove the cause; a patch is a real fix or it is not made.
-- **The UI library knows no use case** (`ui-lib/AGENTS.md`): what an app shows is the app's.
+- **The UI library knows no use case** (`vendor/sdv-everyware/ui-lib/AGENTS.md`): what an app shows is the app's.
 - **A design's names are a contract** with the app's `ui_model.rs`: change both in one commit.
 - **Docs describe what is,** in English, without the history of how it came to be; no em dashes.
 
