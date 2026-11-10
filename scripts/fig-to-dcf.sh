@@ -3,7 +3,7 @@
 # no token, no quota. The same importer as fetch-dcf.sh (dcf-fetch in tools/dcf, on our fork of
 # DesignCompose), fed by fig2json.js instead of the REST API (dcf-fetch --local).
 #
-#   vendor/sdv-everyware/everyware/scripts/fig-to-dcf.sh <project>/design/build/<name>.fig <out.dcf>
+#   vendor/sdv-everyware/everyware/scripts/fig-to-dcf.sh <project>/design/<name>.fig <out.dcf>
 #
 # The first run builds dcf-fetch (tools/dcf/cargo.sh, the tree's cargo, the fork from GitHub).
 #

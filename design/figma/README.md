@@ -93,8 +93,8 @@ flowchart TB
 Every patch arrow is one `node roundtrip.js <in.fig> <out.fig> <patch.js>`; a project's
 `design/build.sh` runs its chain. What goes in is in git (the patches, `library-base.fig`, the
 designer's export); an app's result is its `design/<app>.fig` in git, the intermediates are in `design/build/`, ignored by git and
-written again on every build (a build is deterministic, so the same commit gives the same
-bytes). An app commits the `.dcf` it loads, as DesignCompose apps do, and the `.fig` a designer opens. The Library is built on an empty document, so an app's file carries no
+written again on every build (the content is deterministic: the same sources give the same
+design; only the archive's timestamp differs, so git shows the `.fig` as changed after a build). An app commits the `.dcf` it loads, as DesignCompose apps do, and the `.fig` a designer opens. The Library is built on an empty document, so an app's file carries no
 other app's screen. The panel is built on the designer's drawing, which its patches turn into
 slots and named texts.
 
