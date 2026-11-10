@@ -3,7 +3,9 @@
 A web page runs in a process of its own and shows in the panel's right side; a tap on a news
 story opens its page there. A fault in the browser never takes the dashboard. The device has no
 browser of its own (no Java, no WebView), so the browser comes from a Debian root next to the
-system. This is a development setup started by a script, not part of the image yet.
+system. This is a development setup started by a script, not part of the image yet. It needs
+the panel and harry's Wayland commits, the two rows "the smart home panel" and "the browser zone
+and the Wayland clients" of [status](status.md).
 
 ## What runs
 
@@ -51,10 +53,10 @@ nothing in the image changes, and a reboot brings the installed panel back.
 
 | Mode | What it does | Cost of the panel's process |
 |---|---|---|
-| `--zone-plane` (the script's default) | the browser's buffer goes to a hardware plane of the display; the dashboard is not redrawn for a page's frame | 12 % of a core with a static page |
-| `--no-zone-plane` | the browser's buffer is a texture the dashboard draws; every frame of the page redraws the dashboard | 87 % of a core with a news story open |
+| `--zone-plane` (the script's default) | the browser's buffer goes to a hardware plane of the display; the dashboard is not redrawn for a page's frame | 11 % of a core |
+| `--no-zone-plane` | the browser's buffer is a texture the dashboard draws; every frame of the page redraws the dashboard | most of a core while the page changes |
 
-Measured on the RB3 at 1920x1080 with `run-browser-rb3.sh measure`.
+The plane's figure is `run-browser-rb3.sh measure` on the RB3 at 1920x1080 with a static page open.
 
 ## How a frame and a touch travel
 
@@ -77,6 +79,7 @@ and `har_zone` for harry clients.
 | A crafted URL in the news feed (`javascript:`, `file:`, `data:`, a second line) | closed | the app sends only `http` and `https` and its own `about:blank`, one line of at most 2048 bytes (`browser.rs`); the relay checks the same again |
 | Writing to the FIFOs from outside | closed for apps | 0660 root:2900; opened with `O_NOFOLLOW`, only if a FIFO |
 | `/data/local/tmp` belongs to the shell user | open | development only; a product needs a runtime directory owned by the panel |
+| The relay's pid file and the logs are in the root's `/tmp`, which the browser's user can write, and root reads them | open | development only; a product keeps them in a directory of the panel |
 | The D-Bus bus | narrowed | a socket in a 0700 directory of the user browser, no service activation (`browser-bus.conf`) |
 | The pages the household reads | host only in the log | the app logs the host, the relay logs no URL |
 | A hidden page keeps running | mostly closed | the app sends `about:blank` when the panel closes |

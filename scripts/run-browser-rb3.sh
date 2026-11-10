@@ -6,7 +6,8 @@
 #       adb root, stop the panel, kill the old master/browser (by pidof), push the built
 #       smarthome_app as smarthome_zone with the app's data/, start it with --wayland-zones and
 #       --zone-plane (the browser on a hardware plane of its own: a page's frame costs no redraw
-#       of the dashboard; --no-zone-plane composites it on the GPU instead), wait for
+#       of the dashboard; --no-zone-plane composites it on the GPU instead, and only then
+#       --zone-redraw chooses when the dashboard is redrawn for the zone), wait for
 #       the socket, start Cog in the Debian root as user `browser`. Cog shows in the dashboard's
 #       right panel (#panel/browser): a tap on a news story opens its page there. The page goes
 #       from the dashboard through the FIFO /data/local/tmp/har-browser-open (0660 root:2900)
@@ -22,7 +23,8 @@
 #   run-browser-rb3.sh drag N [X Y]          N synthetic upward drags (120 px, 20 steps, 16 ms
 #                                            apart) starting at screen X Y (default 512 300)
 #
-# Env: SERIAL (default 6aeccbe4), TREE (the Android tree), DRAG_DY (px, default 120).
+# Env: SERIAL (default 6aeccbe4), TREE (the Android tree), DRAG_DY (px, default 120). drag
+# writes to /dev/input/event3, the board's touchscreen.
 # Never `pkill -f "cog ..."`: inside `adb shell` the pattern matches the shell itself.
 set -e
 HERE="$(cd "$(dirname "$0")" && pwd)"
@@ -53,8 +55,8 @@ cmd_start() {
   local redraw="" fps="" plane=1 url="$URL_DEFAULT"
   while [ $# -gt 0 ]; do
     case "$1" in
-      --zone-redraw) redraw="$2"; shift 2 ;;
-      --zone-fps) fps="$2"; shift 2 ;;
+      --zone-redraw) redraw="${2:?--zone-redraw needs timer or frames}"; shift 2 ;;
+      --zone-fps) fps="${2:?--zone-fps needs a number}"; shift 2 ;;
       --zone-plane) plane=1; shift ;;
       --no-zone-plane) plane=""; shift ;;
       -*) echo "unknown option $1" >&2; exit 2 ;;
@@ -68,10 +70,11 @@ cmd_start() {
   A root >/dev/null 2>&1 || true
   A wait-for-device
   for _ in $(seq 20); do [ "$(A shell id -u | tr -d '\r')" = 0 ] && break; sleep 1; done
-  A shell stop smarthome || true
-  kill_old
+  # before the installed panel is stopped: a start that cannot work leaves the board as it is
   [ -f "$BIN" ] || { echo "!! $BIN is not built (m smarthome_app)" >&2; exit 1; }
   A shell 'test -x /data/glibc/rootfs/usr/bin/cog' || { echo "!! no Debian root with Cog on the board (docs/project/browser.md)" >&2; exit 1; }
+  A shell stop smarthome || true
+  kill_old
   A push "$BIN" /data/local/tmp/smarthome_zone >/dev/null
   A shell 'mkdir -p /data/local/tmp/zone-data' && A push "$DATA/." /data/local/tmp/zone-data/ >/dev/null
   A push "$HERE/glibc-enter.sh" /data/glibc/ >/dev/null
@@ -117,7 +120,7 @@ cmd_stop() {
 }
 
 cmd_measure() {
-  A shell 'test -f /data/local/tmp/measure.sh' || A push "$HERE/measure.sh" /data/local/tmp/measure.sh >/dev/null
+  A push "$HERE/measure.sh" /data/local/tmp/measure.sh >/dev/null
   A shell sh /data/local/tmp/measure.sh "${1:-10}"
 }
 
@@ -159,5 +162,5 @@ case "$sub" in
   stop) cmd_stop ;;
   measure) cmd_measure "$@" ;;
   drag) cmd_drag "$@" ;;
-  *) sed -n '2,24p' "$0"; exit 2 ;;
+  *) sed -n '2,28p' "$0"; exit 2 ;;
 esac

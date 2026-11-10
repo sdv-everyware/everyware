@@ -14,7 +14,8 @@ echo $$ > /tmp/har-browser-relay.pid
 exec 3<>"$FIFO" || exit 1
 while IFS= read -r url <&3; do
   case "$url" in
-    about:blank|http://*|https://*) ;;
+    # the scheme in any case, as the app takes it (browser.rs is_web)
+    about:blank|[Hh][Tt][Tt][Pp]://*|[Hh][Tt][Tt][Pp][Ss]://*) ;;
     *) echo "refused: not a web address"; continue ;;
   esac
   case "$url" in

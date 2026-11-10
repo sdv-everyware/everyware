@@ -1,6 +1,6 @@
 #!/system/bin/sh
 # glibc-enter.sh -- run a command inside the Debian (glibc) root on the device, as a Wayland
-# client of the HAR master. PoC form of the glibc layer: a chroot under /data, runtime mounts
+# client of the HAR master. The development form of the glibc layer: a chroot under /data, runtime mounts
 # only, root, the SELinux domain of the caller (the board is permissive). The product form is
 # an APEX with its own domain (docs/project/browser.md, Open).
 #
@@ -34,7 +34,7 @@ node() {
     mknod -m "$4" "$R/dev/$1" c $((0x$2)) $((0x$3))
 }
 if mounted "$R/dev" && [ -e "$R/dev/kmsg" ]; then
-    umount -l "$R/dev"                   # an older run bound the whole /dev
+    umount -l "$R/dev"                   # the host's whole /dev must not be in the root
 fi
 mounted "$R/dev" || mount -t tmpfs -o mode=0755,nosuid,noexec tmpfs "$R/dev"
 # card0: WebKit lists DRM devices by their nodes and wants the primary one to exist; its mode

@@ -13,7 +13,9 @@
 FIFO=/run/har/har-browser-events
 LOG=/home/browser/cog.log
 : > "$LOG"
-exec 3<>"$FIFO" 2>/dev/null || exec cog --platform=wl "$@" >>"$LOG" 2>&1
+# tested first: a redirection that fails ends a POSIX shell, an || after it never runs
+[ -p "$FIFO" ] || exec cog --platform=wl "$@" >>"$LOG" 2>&1
+exec 3<>"$FIFO"
 cog --platform=wl "$@" 2>&1 | while IFS= read -r line; do
   printf '%s\n' "$line" >>"$LOG"
   case "$line" in
