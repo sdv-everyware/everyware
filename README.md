@@ -7,7 +7,7 @@
 <p align="center">
   <b>Google's SDV Media on every embedded device, with and without a screen.</b><br>
   Not a new OS: Google's <a href="https://source.android.com/docs/automotive/sdv">AAOS SDV</a> taken out of the car, the cluster's safety monitoring off, a smart home's services on. Android without Java.
-  A delightfully fast boot. A Figma design as the screen. Services in Rust. Updatable for years.
+  A delightfully fast boot. A Figma design as the screen. Services and UI in Rust. Updatable for years.
 </p>
 
 <p align="center">
