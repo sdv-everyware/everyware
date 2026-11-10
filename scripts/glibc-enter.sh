@@ -9,8 +9,9 @@
 #   sh /data/glibc/glibc-enter.sh apt-get install -y cog
 #   sh /data/glibc/glibc-enter.sh cog --platform=wl https://example.org
 #
-# Inside: XDG_RUNTIME_DIR=/run/har is the master's socket directory (/data/local/tmp, where
-# smarthome_zone --wayland-zones listens as har-display), WAYLAND_DISPLAY=har-display.
+# Inside: XDG_RUNTIME_DIR=/run/har is the master's socket directory (HAR_SOCKET_DIR; without
+# it /data/local/tmp, where a developer's build of the panel listens as har-display),
+# WAYLAND_DISPLAY=har-display.
 # DNS: the Wi-Fi DHCP lease (vendor.net.wlan0.dns*), as Android's own resolver has no glibc side.
 set -e
 R=${GLIBC_ROOT:-/data/glibc/rootfs}
@@ -52,14 +53,17 @@ bind "$SOCKDIR" "$R/run/har"
 # the browser's helper scripts from the image (everyware-browser.sh), read by the root's shell
 [ -n "$HAR_BROWSER_LIB" ] && bind "$HAR_BROWSER_LIB" "$R/usr/local/lib/har-browser"
 
-: > "$R/etc/resolv.conf"
+# written beside and moved in place: two callers may enter at the same time
+resolv="$R/etc/resolv.conf.$$"
+: > "$resolv"
 for n in 1 2 3 4; do
   # by its path: a vendor shell (init's service) has only /vendor/bin on its PATH, and there
   # is no getprop there
-  d=$(/system/bin/getprop vendor.net.wlan0.dns$n)
-  [ -n "$d" ] && echo "nameserver $d" >> "$R/etc/resolv.conf"
+  d=$(/system/bin/getprop vendor.net.wlan0.dns$n) || d=
+  [ -n "$d" ] && echo "nameserver $d" >> "$resolv"
 done
-[ -s "$R/etc/resolv.conf" ] || echo "nameserver 8.8.8.8" > "$R/etc/resolv.conf"
+[ -s "$resolv" ] || echo "nameserver 8.8.8.8" > "$resolv"
+mv "$resolv" "$R/etc/resolv.conf"
 
 [ $# -gt 0 ] || set -- /bin/bash -l
 exec chroot "$R" /usr/bin/env -i \

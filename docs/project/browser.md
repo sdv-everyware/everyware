@@ -38,6 +38,8 @@ installed in it from Debian's own packages:
 3. In the root (`adb shell sh /data/glibc/glibc-enter.sh`): `apt-get update`, then
    `apt-get install -y cog dbus`, then a user `browser` with uid and gid 2900 and the home
    `/home/browser`.
+4. Reboot, or `adb shell start everyware_browser`: the service looks for the root when the
+   panel starts.
 
 ## How it starts
 
@@ -73,7 +75,7 @@ installed ones back.
 
 | Mode | What it does | Cost of the panel's process |
 |---|---|---|
-| `--zone-plane` (the script's default) | the browser's buffer goes to a hardware plane of the display; the dashboard is not redrawn for a page's frame | 11 % of a core |
+| `--zone-plane` (the installed panel, and the default of `run-browser-rb3.sh`) | the browser's buffer goes to a hardware plane of the display; the dashboard is not redrawn for a page's frame | 11 % of a core |
 | `--no-zone-plane` | the browser's buffer is a texture the dashboard draws; every frame of the page redraws the dashboard | most of a core while the page changes |
 
 The plane's figure is `run-browser-rb3.sh measure` on the RB3 at 1920x1080 with a static page open.
@@ -99,7 +101,7 @@ and `har_zone` for harry clients.
 | A crafted URL in the news feed (`javascript:`, `file:`, `data:`, a second line) | closed | the app sends only `http` and `https` and its own `about:blank`, one line of at most 2048 bytes (`browser.rs`); the relay checks the same again |
 | Writing to the FIFOs from outside | closed for apps | 0660 root:2900; opened with `O_NOFOLLOW`, only if a FIFO |
 | The socket and the FIFOs in a directory others can write | closed for the installed browser | `/data/vendor/everyware/run`, 0750 root:2900; a developer's run still uses `/data/local/tmp` |
-| The relay's pid file and the logs are in the root's `/tmp`, which the browser's user can write, and root reads them | open | development only; a product keeps them in a directory of the panel |
+| Root opening a file in a directory the browser's user can write | closed for the installed browser | the logs are opened by the browser's own shell in its home; a developer's run still keeps the relay's pid file and two logs in the root's `/tmp` |
 | The D-Bus bus | narrowed | a socket in a 0700 directory of the user browser, no service activation (`browser-bus.conf`) |
 | The pages the household reads | host only in the log | the app logs the host, the relay logs no URL |
 | A hidden page keeps running | mostly closed | the app sends `about:blank` when the panel closes |

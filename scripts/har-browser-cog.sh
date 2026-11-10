@@ -1,5 +1,6 @@
 #!/bin/sh
-# har-browser-cog.sh -- inside the Debian root, as user browser (run-browser-rb3.sh): runs Cog
+# har-browser-cog.sh -- inside the Debian root, as user browser (everyware-browser.sh, or
+# run-browser-rb3.sh for a developer's build): runs Cog
 # and tells the dashboard how its page is doing, for the loader over the browser
 # (smarthome-app browser.rs BrowserEvent). Cog's output still goes to its log; from it one
 # word a line goes to the FIFO /run/har/har-browser-events:

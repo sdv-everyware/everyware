@@ -1,6 +1,6 @@
 #!/bin/sh
-# har-browser-relay.sh -- inside the Debian root, as user browser (run-browser-rb3.sh starts it
-# beside Cog): the pages the dashboard asks for, one URL a line in the FIFO
+# har-browser-relay.sh -- inside the Debian root, as user browser (everyware-browser.sh starts
+# it beside Cog, or run-browser-rb3.sh for a developer's build): the pages the dashboard asks for, one URL a line in the FIFO
 # /run/har/har-browser-open, go to Cog with cogctl over the root's own D-Bus session bus.
 #
 # The dashboard (smarthome-app browser.rs) sends only http, https and about:blank, one line,

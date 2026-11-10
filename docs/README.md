@@ -30,7 +30,7 @@ Read the concepts in order; each page has one idea, one diagram and a link to th
 - [Decisions](project/decisions.md): what was decided, when, why.
 - [Status](project/status.md): what works, what is missing, next steps.
 - [Open points](project/open-points.md): looked at, not decided yet (device discovery).
-- [A browser on the panel](project/browser.md): a web page in a zone of the screen, the run script, the security state.
+- [A browser on the panel](project/browser.md): a web page in a zone of the screen, how the image starts it, the security state.
 - [Glossary](glossary.md)
 
 ## Official documentation
