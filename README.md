@@ -133,7 +133,7 @@ The same UI library, three apps, captured on the reference board (1920 x 1080 ov
 
 <p align="center">
   <img src="docs/assets/dashboard-design-v1.png" alt="The panel's design in Figma" width="700"><br>
-  <sub>An earlier design of the panel in Figma. The screen at the top of this page is <code>smarthome-app</code>; it reaches the public tree with <a href="https://github.com/sdv-everyware/everyware/issues/14">#14</a>, its camera tile is a picture from the design until the camera stream exists (<a href="https://github.com/sdv-everyware/everyware/issues/44">#44</a>).</sub>
+  <sub>An earlier design of the panel in Figma. The screen at the top of this page is <code>smarthome-app</code>; its camera tile is a picture from the design until the camera stream exists (<a href="https://github.com/sdv-everyware/everyware/issues/44">#44</a>).</sub>
 </p>
 
 ## How it works
@@ -175,10 +175,10 @@ manifest and the two forks in the tree (Google's harry, Linaro's board support) 
 |---|---|---|
 | [`everyware`](https://github.com/sdv-everyware/everyware) (this one) | `vendor/sdv-everyware/everyware` | the service bundles, their catalog and policies, the product additions, the design tools, the documentation |
 | [`ui-lib`](https://github.com/sdv-everyware/ui-lib) | `vendor/sdv-everyware/ui-lib` | the UI library: components by role, their behaviour, the Library as a Figma file and as a `.dcf` |
-| [`smarthome-app`](https://github.com/sdv-everyware/smarthome-app), [`tv-app`](https://github.com/sdv-everyware/tv-app), [`hub-app`](https://github.com/sdv-everyware/hub-app), [`pairs-app`](https://github.com/sdv-everyware/pairs-app) | `packages/services/display_safety/utils/<name>` | the apps on harry; `tv-app` is the reference app of the library; `smarthome-app` arrives with [#14](https://github.com/sdv-everyware/everyware/issues/14) |
+| [`smarthome-app`](https://github.com/sdv-everyware/smarthome-app), [`tv-app`](https://github.com/sdv-everyware/tv-app), [`hub-app`](https://github.com/sdv-everyware/hub-app), [`pairs-app`](https://github.com/sdv-everyware/pairs-app) | `packages/services/display_safety/utils/<name>` | the apps on harry; `tv-app` is the reference app of the library; `smarthome-app` is the smart home panel |
 | [`super-harry`](https://github.com/sdv-everyware/super-harry) | `packages/services/display_safety` | harry as AOSP has it, plus the commits a 1080p touch panel needs |
 | [`device-rb3`](https://github.com/sdv-everyware/device-rb3) | `device/rb3/sdv_media_db845c` | the product of the reference board: SDV Media's core, the display, the network, the bundles. A new target is a repository like this one |
-| [`dragonboard`](https://github.com/sdv-everyware/dragonboard) | `device/linaro/dragonboard` | Linaro's support for the reference board, with one policy change (being published, [#16](https://github.com/sdv-everyware/everyware/issues/16)) |
+| [`dragonboard`](https://github.com/sdv-everyware/dragonboard) | `device/linaro/dragonboard` | Linaro's support for the reference board, with one policy change |
 | [`dnsproxyd`](https://github.com/sdv-everyware/dnsproxyd) | `vendor/sdv-everyware/dnsproxyd` | name resolution for a device without netd |
 | [`third_party-rust`](https://github.com/sdv-everyware/third_party-rust), [`third_party-chrony`](https://github.com/sdv-everyware/third_party-chrony) | `vendor/sdv-everyware/third_party/{rust,chrony}` | the Rust crates the tree lacks (rs-matter, tokio-openssl), chrony |
 | [`automotive-design-compose`](https://github.com/sdv-everyware/automotive-design-compose) | (host tools only) | our fork of DesignCompose: the importer behind the design tools |
@@ -203,8 +203,8 @@ You need a Linux machine with the [AOSP build requirements](https://source.andro
 and about 400 GB of disk. The tree is the same for every target; the last two lines pick one.
 
 ```bash
-# the public AOSP tree at the release tag, plus the project's repositories
-# (until #16 is done, the dragonboard fork is missing and this sync stops there)
+# the public AOSP tree at the release tag, plus the project's repositories; the sync also
+# links AGENTS.md and CLAUDE.md, the guide for coding agents, to the tree's top
 repo init -u https://android.googlesource.com/platform/manifest -b android-17.0.0_r1
 git clone -b everyware-17.0.0_r1 https://github.com/sdv-everyware/manifest .repo/local_manifests
 repo sync -c -j8

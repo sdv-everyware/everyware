@@ -3,7 +3,8 @@
 EveryWare is SDV Media for embedded devices that are not a car: a smart-home panel first. It
 lives in the AOSP tree as several git repositories; this one, `everyware`, is
 the platform side (service bundles, the catalog, docs, the Figma tools). Paths below are from
-the tree's top.
+the tree's top. The manifest links this file to the tree's top as `AGENTS.md` and `CLAUDE.md`,
+so an agent opened on the tree reads it first.
 
 Read this file, then the `AGENTS.md` nearest to your change, then the skill for your task.
 
@@ -12,7 +13,7 @@ Read this file, then the `AGENTS.md` nearest to your change, then the skill for 
 | Repository | What it is | Its guide |
 |---|---|---|
 | `vendor/sdv-everyware/everyware` | service bundles, the catalog, the product, the docs (`docs/`), the Figma tools (`design/figma/`), scripts | this file |
-| `vendor/sdv-everyware/ui-lib` | the UI library: components and nothing else | `ui-lib/AGENTS.md` |
+| `vendor/sdv-everyware/ui-lib` | the UI library: components and nothing else | `vendor/sdv-everyware/ui-lib/AGENTS.md` |
 | `packages/services/display_safety/utils/<name>-app` | one app each (smarthome, hub, tv, pairs, ...): its code, its design, its content | the app's `AGENTS.md` |
 | `vendor/sdv-everyware/third_party/rust` | vendored Rust crates (rs-matter) | |
 | `vendor/sdv-everyware/dnsproxyd` | the DNS proxy for the bundles | |
@@ -34,12 +35,13 @@ Each is a `SKILL.md` with the steps; load the one whose "use when" fits.
 | `sheet` | `vendor/sdv-everyware/ui-lib/skills/sheet` | a sheet, a dialog or a side panel over the screen |
 | `figma-design` | `vendor/sdv-everyware/everyware/skills/figma-design` | a screen, a sheet or the designer's prototype of the panel |
 | `service-bundle` | `vendor/sdv-everyware/everyware/skills/service-bundle` | a new SDV service bundle (publisher, subscriber, RPC, a bridge to the screen) |
-| `harry-app` | `packages/services/display_safety/utils/smarthome-app/skills/harry-app` | writing, building, running or debugging a harry app |
 | `review` | `vendor/sdv-everyware/everyware/skills/review` | a feature branch is ready: the review by another agent, before the user looks |
 
-More to read: `docs/README.md` (the platform, page by page), `design/figma/README.md` (designs
-as code), `vendor/sdv-everyware/ui-lib/design/WORKFLOW.md` (agents and designers on one
-Library), `vendor/sdv-everyware/ui-lib/docs/llms.txt` (the library's rules).
+More to read: `vendor/sdv-everyware/everyware/docs/README.md` (the platform, page by page),
+`vendor/sdv-everyware/everyware/design/figma/README.md` (designs as code), `vendor/sdv-everyware/ui-lib/design/WORKFLOW.md` (agents and designers on one
+Library), `vendor/sdv-everyware/ui-lib/docs/llms.txt` (the library's rules),
+`packages/services/display_safety/utils/smarthome-app/docs/harry-app-anatomy.md` (a harry app,
+from the Figma layer to the frame).
 
 ## How a change lands
 
@@ -54,7 +56,7 @@ the user asks ──► 1 a branch feature/<name> in every repository the change
               ──► 6 the user looks and says "land it" ──► merged into main, branch deleted
 ```
 
-`scripts/feature.sh` does the mechanical part in every repository the change touches:
+`vendor/sdv-everyware/everyware/scripts/feature.sh` does the mechanical part in every repository the change touches:
 
 ```bash
 FS=vendor/sdv-everyware/everyware/scripts/feature.sh
@@ -91,7 +93,7 @@ commit that does not come from `feature.sh land`, however it is made (a merge, a
 cherry-pick, a revert, a reset, `branch -f`, a push into the repository).
 
 - **Which hooks are in force:** `main`'s version, copied into each repository's `.git/hooks` by
-  `scripts/setup-agents.sh` (a new repository, whose `main` has none yet, gets its own files).
+  `vendor/sdv-everyware/everyware/scripts/setup-agents.sh` (a new repository, whose `main` has none yet, gets its own files).
   So they are the same on every branch, also one without hook files, and a change of a hook
   takes effect when it landed, not while it is on a branch.
 - **What they do not hold:** the deletion of `main`, which git cannot tell from packing the refs;
@@ -109,7 +111,7 @@ cherry-pick, a revert, a reset, `branch -f`, a push into the repository).
 - **What no script here can know:** whether the reviewer was another agent, and whether the user
   said "land it". Both are rules.
 
-`scripts/test-feature.sh` tries the rules of the scripts and the hooks case by case in a
+`vendor/sdv-everyware/everyware/scripts/test-feature.sh` tries the rules of the scripts and the hooks case by case in a
 throwaway tree, and what must keep working under the hooks (git gc, a rebase, a stash).
 
 ## Rules for every change
@@ -131,7 +133,7 @@ Working with the user:
 In the code:
 
 - **Production, not workarounds:** remove the cause; a patch is a real fix or it is not made.
-- **The UI library knows no use case** (`ui-lib/AGENTS.md`): what an app shows is the app's.
+- **The UI library knows no use case** (`vendor/sdv-everyware/ui-lib/AGENTS.md`): what an app shows is the app's.
 - **A design's names are a contract** with the app's `ui_model.rs`: change both in one commit.
 - **Docs describe what is,** in English, without the history of how it came to be; no em dashes.
 
@@ -151,6 +153,6 @@ The hooks in `scripts/git-hooks/` of each repository check the branch, the autho
 strings and the attribution: a commit that breaks them is refused. The private words of the
 person (a user id, a work address) are not in the hook but in `~/.config/everyware/private-words`,
 outside git, one extended regex per line; `setup-agents.sh` writes the empty file, the person
-fills it. `scripts/setup-agents.sh`
+fills it. `vendor/sdv-everyware/everyware/scripts/setup-agents.sh`
 installs the hooks in every repository of the project (once per checkout, and after a hook
 changed; `feature.sh land` does that, `feature.sh status` says when a copy is old).
