@@ -49,10 +49,14 @@ mounted "$R/dev/pts" || mount -t devpts -o newinstance,ptmxmode=0666 devpts "$R/
 mounted "$R/dev/shm" || { mkdir -p "$R/dev/shm"; mount -t tmpfs -o mode=1777 tmpfs "$R/dev/shm"; }
 mounted "$R/tmp" || mount -t tmpfs -o mode=1777 tmpfs "$R/tmp"
 bind "$SOCKDIR" "$R/run/har"
+# the browser's helper scripts from the image (everyware-browser.sh), read by the root's shell
+[ -n "$HAR_BROWSER_LIB" ] && bind "$HAR_BROWSER_LIB" "$R/usr/local/lib/har-browser"
 
 : > "$R/etc/resolv.conf"
 for n in 1 2 3 4; do
-  d=$(getprop vendor.net.wlan0.dns$n)
+  # by its path: a vendor shell (init's service) has only /vendor/bin on its PATH, and there
+  # is no getprop there
+  d=$(/system/bin/getprop vendor.net.wlan0.dns$n)
   [ -n "$d" ] && echo "nameserver $d" >> "$R/etc/resolv.conf"
 done
 [ -s "$R/etc/resolv.conf" ] || echo "nameserver 8.8.8.8" > "$R/etc/resolv.conf"

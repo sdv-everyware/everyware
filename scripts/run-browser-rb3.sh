@@ -1,5 +1,6 @@
 #!/bin/bash
-# run-browser-rb3.sh -- run the panel with a browser zone on the RB3 and measure it.
+# run-browser-rb3.sh -- run a developer's build of the panel with a browser zone on the RB3
+# and measure it. The installed panel starts its browser by itself (product/everyware_browser.rc).
 # What runs, the Debian root it needs and the modes: docs/project/browser.md.
 #
 #   run-browser-rb3.sh start [--no-zone-plane] [--zone-redraw timer|frames] [--zone-fps N] [URL]
@@ -19,6 +20,7 @@
 #       Env: WEBKIT_DEBUG=Events,Scrolling   passed to Cog (its log: /home/browser/cog.log in
 #                                            the root, /data/glibc/rootfs/home/browser/cog.log)
 #   run-browser-rb3.sh stop                  kill master + browser, start the installed panel
+#                                            (and with it the installed browser)
 #   run-browser-rb3.sh measure [SECONDS]     CPU and memory per process (default 10 s)
 #   run-browser-rb3.sh drag N [X Y]          N synthetic upward drags (120 px, 20 steps, 16 ms
 #                                            apart) starting at screen X Y (default 512 300)
@@ -73,6 +75,8 @@ cmd_start() {
   # before the installed panel is stopped: a start that cannot work leaves the board as it is
   [ -f "$BIN" ] || { echo "!! $BIN is not built (m smarthome_app)" >&2; exit 1; }
   A shell 'test -x /data/glibc/rootfs/usr/bin/cog' || { echo "!! no Debian root with Cog on the board (docs/project/browser.md)" >&2; exit 1; }
+  # the installed browser first: its script would start Cog again
+  A shell stop everyware_browser 2>/dev/null || true
   A shell stop smarthome || true
   kill_old
   A push "$BIN" /data/local/tmp/smarthome_zone >/dev/null
@@ -162,5 +166,5 @@ case "$sub" in
   stop) cmd_stop ;;
   measure) cmd_measure "$@" ;;
   drag) cmd_drag "$@" ;;
-  *) sed -n '2,28p' "$0"; exit 2 ;;
+  *) sed -n '2,30p' "$0"; exit 2 ;;
 esac

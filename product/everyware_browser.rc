@@ -1,0 +1,13 @@
+# The browser of the panel (scripts/everyware-browser.sh, docs/project/browser.md): started
+# when the panel runs, so that its Wayland socket is there or about to be. One service: the
+# script keeps Cog, its bus and the relay as its children and starts them again when one ends.
+# Root, because it enters the Debian root (chroot, mounts) before it becomes the user browser.
+service everyware_browser /vendor/bin/everyware-browser.sh
+    class main
+    user root
+    group root
+    disabled
+    oneshot
+
+on property:init.svc.smarthome=running
+    start everyware_browser
