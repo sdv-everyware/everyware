@@ -48,8 +48,7 @@ kernel and the hardware, nothing between it and the display.
 
 Nothing in it is specific to cars. SDV EveryWare takes it out of the car and puts it on the wall.
 It writes no operating system: SDV Media comes from AOSP as it is, harry with the commits a touch
-panel needs, and this project adds what a
-house needs on top of it. A device product for the board, the service bundles (weather, news,
+panel needs, and this project adds what a house needs on top of it. A device product for the board, the service bundles (weather, news,
 Wi-Fi, Matter), a UI library, the tools from Figma to the screen, and the documentation.
 
 ## What you get
@@ -169,7 +168,7 @@ network, the product makefile); everything above it is the same.
 
 SDV EveryWare is a set of repositories in this organisation, checked out into the public AOSP
 tree by the local manifest in [`manifest`](https://github.com/sdv-everyware/manifest). The
-manifest and the two forks of Google's and Linaro's repositories carry a branch per AOSP release
+manifest and the two forks in the tree (Google's harry, Linaro's board support) carry a branch per AOSP release
 (`everyware-17.0.0_r1`); our own repositories live on `main`.
 
 | Repository | Path in the tree | What it holds |
@@ -205,6 +204,7 @@ and about 400 GB of disk. The tree is the same for every target; the last two li
 
 ```bash
 # the public AOSP tree at the release tag, plus the project's repositories
+# (until #16 is done, the dragonboard fork is missing and this sync stops there)
 repo init -u https://android.googlesource.com/platform/manifest -b android-17.0.0_r1
 git clone -b everyware-17.0.0_r1 https://github.com/sdv-everyware/manifest .repo/local_manifests
 repo sync -c -j8
