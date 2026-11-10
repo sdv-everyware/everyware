@@ -35,6 +35,7 @@ Each is a `SKILL.md` with the steps; load the one whose "use when" fits.
 | `sheet` | `vendor/sdv-everyware/ui-lib/skills/sheet` | a sheet, a dialog or a side panel over the screen |
 | `figma-design` | `vendor/sdv-everyware/everyware/skills/figma-design` | a screen, a sheet or the designer's prototype of the panel |
 | `service-bundle` | `vendor/sdv-everyware/everyware/skills/service-bundle` | a new SDV service bundle (publisher, subscriber, RPC, a bridge to the screen) |
+| `harry-app` | `vendor/sdv-everyware/ui-lib/skills/harry-app` | changing, building, running or debugging a harry app |
 | `review` | `vendor/sdv-everyware/everyware/skills/review` | a feature branch is ready: the review by another agent, before the user looks |
 
 More to read: `vendor/sdv-everyware/everyware/docs/README.md` (the platform, page by page),
