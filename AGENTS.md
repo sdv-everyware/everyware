@@ -16,7 +16,7 @@ Read this file, then the `AGENTS.md` nearest to your change, then the skill for 
 | `packages/services/display_safety/utils/<name>-app` | one app each (smarthome, hub, tv, pairs, ...): its code, its design, its content | the app's `AGENTS.md` |
 | `vendor/sdv-everyware/third_party/rust` | vendored Rust crates (rs-matter) | |
 | `vendor/sdv-everyware/dnsproxyd` | the DNS proxy for the bundles | |
-| `device/qcom/rb3` (sdv_media_db845c) | the board | |
+| `device/rb3/sdv_media_db845c` | the product of the reference board (Qualcomm RB3) | its README |
 
 Who owns what, in one line each: a **bundle** sends information; an **app** decides what it
 looks like (composition, content, its own pictures); the **UI library** has components that
