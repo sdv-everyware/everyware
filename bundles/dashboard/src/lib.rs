@@ -1,23 +1,22 @@
 //! DashboardServiceBundle: the bridge between the house's topics and the screen. It
-//! subscribes to what the dashboard shows (`weather`, `news`, `wifi-networks`, `wifi-state`,
-//! catalog/everyware.vsidl) and pushes every update over a local gRPC connection to the harry
-//! process, which hosts the server on 127.0.0.1 (proto/dashboard.proto); the harry process
-//! itself is no SDV participant. The same shape as HAR's HarSdvServiceBundle pushing to
-//! harry-app. Wi-Fi goes over binder instead (screen.rs, interfaces/screen): the networks and the
-//! state to the panel, and the other way the screen's Wi-Fi commands, which carry the password
-//! typed on it; the bundle calls the Wi-Fi bundle's `WifiService` (SDV RPC,
-//! catalog/wifi_service.proto) for each and hands the answer back.
+//! subscribes to what the dashboard shows (`weather`, `news`, `news-thumbnails`,
+//! `wifi-networks`, `wifi-state`, `matter-devices`, catalog/everyware.vsidl) and pushes every
+//! update to the panel over binder (screen.rs, interfaces/screen IScreenLink); the panel itself
+//! is no SDV participant. The same shape as HAR's HarSdvServiceBundle pushing to harry-app: the
+//! screen serves, the bundle calls it. The other way, the screen's commands come into this
+//! bundle's sink: a Wi-Fi command (it may carry the password typed on the screen) becomes a call
+//! of the Wi-Fi bundle's `WifiService`, a Matter command one of the Matter bundle's
+//! `MatterService` (SDV RPC, catalog/*_service.proto), and the answer goes back to the screen.
 //!
-//! The bundle keeps the last value of every topic and sends it again when the link comes
-//! back (the harry process restarted), and a heartbeat once a second, so the screen can tell
-//! "no data" from "no change".
+//! The bundle keeps the last value of every topic and sends it again when the panel comes back
+//! (it restarted and starts from nothing). Whether the link is up, the panel learns from binder:
+//! it watches the bundle's sink (a death recipient), so there is no heartbeat.
 //!
 //! The service bundle itself is shaped as vsidlc generates it (`vsidlc --services`): a
 //! `ServiceBundle` with `SdvComms`, a current-thread runtime, `sdv_main` with the bundle's
 //! subscriptions; the business logic is in the `handle_*` functions.
 
 use futures_util::stream::StreamExt;
-use grpcio::{ChannelBuilder, EnvBuilder};
 use log::{debug, error, info, warn};
 use protobuf::Message;
 use sdv::mw::{clientlib, Availability, Communicate, SdvComms, SubscribeOptions};
@@ -27,21 +26,19 @@ use com_everyware_wifi_service_rpc::Client as WifiClient;
 use everyware_catalog::matter_service::matter_command::Command as MatterCmd;
 use everyware_catalog::wifi::wifi_command::Command;
 use sdv_mw_rs_com_everyware_dashboard_service_bundle::{ClientDescriptors, DashboardServiceBundle as Bundle, SubscriberDescriptors};
-use everyware_dashboard_grpc::dashboard::{HeartbeatRequest, MatterCommandResult, Subscribe};
-use everyware_dashboard_grpc::dashboard_grpc::DashboardServiceClient;
 use std::fmt::Debug;
-use std::sync::{Arc, Mutex};
-use std::time::{Duration, Instant};
+use std::sync::{Arc, Mutex, OnceLock};
+use std::time::Duration;
+use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver};
 use tokio::time::sleep;
 use tokio_util::sync::CancellationToken;
 
 mod screen;
-use screen::Screen;
+use screen::{Screen, ScreenCommand};
 
-/// Where the harry process listens (smarthome-app src/house_link.rs).
-pub const HARRY_ADDRESS: &str = "127.0.0.1:7100";
-/// Between heartbeats.
-const HEARTBEAT: Duration = Duration::from_secs(1);
+/// How often the panel is looked for while it is not there, and the sink handed again while it
+/// does not take it.
+const TICK: Duration = Duration::from_secs(1);
 /// The deadline of a WifiService call: a connect is answered when the network is joined or
 /// the supplicant gave up on it (the Wi-Fi bundle answers within 35 s).
 const WIFI_CALL_TIMEOUT: Duration = Duration::from_secs(40);
@@ -49,39 +46,36 @@ const WIFI_CALL_TIMEOUT: Duration = Duration::from_secs(40);
 /// 150 s, a device command within its 20 s.
 const MATTER_CALL_TIMEOUT: Duration = Duration::from_secs(160);
 
-type GrpcWeather = everyware_dashboard_grpc::weather::Weather;
-type GrpcNews = everyware_dashboard_grpc::news::NewsFeed;
-type CatalogNews = everyware_catalog::news::NewsFeed;
-type GrpcThumbnail = everyware_dashboard_grpc::news::NewsThumbnail;
-type CatalogThumbnail = everyware_catalog::news::NewsThumbnail;
-type CatalogThumbnails = everyware_catalog::news::NewsThumbnails;
-type CatalogWeather = everyware_catalog::weather::Weather;
-type CatalogWifiNetworks = everyware_catalog::wifi::WifiNetworks;
-type CatalogWifiState = everyware_catalog::wifi::WifiState;
-type CatalogWifiCommand = everyware_catalog::wifi::WifiCommand;
-type CatalogWifiResult = everyware_catalog::wifi_service::WifiResult;
-type GrpcMatterDevices = everyware_dashboard_grpc::matter::MatterDevices;
-type CatalogMatterDevices = everyware_catalog::matter::MatterDevices;
-type GrpcMatterCommand = everyware_dashboard_grpc::matter_service::MatterCommand;
-type CatalogMatterCommand = everyware_catalog::matter_service::MatterCommand;
-type GrpcMatterResult = everyware_dashboard_grpc::matter_service::MatterResult;
-type CatalogMatterResult = everyware_catalog::matter_service::MatterResult;
+type News = everyware_catalog::news::NewsFeed;
+type Thumbnail = everyware_catalog::news::NewsThumbnail;
+type Thumbnails = everyware_catalog::news::NewsThumbnails;
+type Weather = everyware_catalog::weather::Weather;
+type WifiNetworks = everyware_catalog::wifi::WifiNetworks;
+type WifiState = everyware_catalog::wifi::WifiState;
+type WifiCommand = everyware_catalog::wifi::WifiCommand;
+type WifiResult = everyware_catalog::wifi_service::WifiResult;
+type MatterDevices = everyware_catalog::matter::MatterDevices;
+type MatterCommand = everyware_catalog::matter_service::MatterCommand;
+type MatterResult = everyware_catalog::matter_service::MatterResult;
 
-/// The last value of every topic, sent again after a reconnect.
+/// The last value of every topic, sent again when the panel comes back.
 #[derive(Default)]
 struct Last {
-    weather: Option<GrpcWeather>,
-    news: Option<GrpcNews>,
+    weather: Option<Weather>,
+    news: Option<News>,
     /// The thumbnails of the stories of the last feed, by id.
-    thumbnails: std::collections::BTreeMap<u64, GrpcThumbnail>,
-    wifi_networks: Option<CatalogWifiNetworks>,
-    wifi_state: Option<CatalogWifiState>,
-    matter_devices: Option<GrpcMatterDevices>,
+    thumbnails: std::collections::BTreeMap<u64, Thumbnail>,
+    wifi_networks: Option<WifiNetworks>,
+    wifi_state: Option<WifiState>,
+    matter_devices: Option<MatterDevices>,
 }
 
-/// The catalog's type and the gRPC crate's are the same wire format.
-fn convert<From: Message, To: Message>(message: &From) -> Option<To> {
-    To::parse_from_bytes(&message.write_to_bytes().ok()?).ok()
+/// The services the screen's commands go to, once they are there (the bundles start in any
+/// order).
+#[derive(Default)]
+struct Services {
+    wifi: OnceLock<Arc<WifiClient>>,
+    matter: OnceLock<Arc<MatterClient>>,
 }
 
 sdv::lifecycle::register_service_bundle!(DashboardServiceBundle);
@@ -156,38 +150,37 @@ async fn sdv_main(comms: Arc<dyn Communicate>) -> SdvResult<()> {
         }
     };
 
-    // One channel to the harry process; grpcio reconnects it on its own.
-    let channel = ChannelBuilder::new(Arc::new(EnvBuilder::new().build()))
-        .initial_reconnect_backoff(Duration::from_millis(10))
-        .max_reconnect_backoff(Duration::from_millis(500))
-        .connect(HARRY_ADDRESS);
-    let client = Arc::new(DashboardServiceClient::new(channel));
+    let (commands_tx, commands_rx) = unbounded_channel();
+    let (deaths_tx, deaths_rx) = unbounded_channel();
+    let screen = Arc::new(Screen::new(commands_tx, deaths_tx));
     let last = Arc::new(Mutex::new(Last::default()));
-    info!("pushing to the harry process at {HARRY_ADDRESS}");
-    let screen = Arc::new(Screen::default());
+    let services = Arc::new(Services::default());
 
     let mut futures_join_set = tokio::task::JoinSet::new();
-    futures_join_set.spawn(handle_heartbeat(client.clone(), last.clone()));
-    futures_join_set.spawn(handle_screen(screen.clone(), last.clone()));
-    // The Matter devices on their own: their bundle may come late or not at all, and the
-    // subscriptions below wait for their publishers one after the other.
-    futures_join_set.spawn(matter_link(comms.clone(), client.clone(), last.clone()));
+    futures_join_set.spawn(handle_screen(screen.clone(), last.clone(), deaths_rx));
+    futures_join_set.spawn(handle_commands(commands_rx, screen.clone(), services.clone()));
+    // The services the commands go to, each on its own: a bundle may come late or not at all.
+    // Not in the join set: they end once their service is found.
+    tokio::spawn(find_wifi(comms.clone(), services.clone()));
+    // The Matter devices on their own too: the subscriptions below wait for their publishers
+    // one after the other.
+    tokio::spawn(matter_link(comms.clone(), screen.clone(), last.clone(), services.clone()));
     // The publishers may start later than this bundle: every subscription waits on its own.
     // Every topic is state (the weather now, the feed now, the networks now): a subscription
     // gets the publication's last message at once (read_on_subscribe), so what a bundle
     // published before this one subscribed, its last reading kept from the previous start
     // among it, reaches the screen (the thumbnails of a feed are one message for this).
     let latest = SubscribeOptions::builder().read_on_subscribe(true).build()?;
-    let weather = SubscriberDescriptors::<CatalogWeather>::WEATHER;
+    let weather = SubscriberDescriptors::<Weather>::WEATHER;
     if wait_for_publisher_to_be_available(comms.as_ref(), weather).await.is_ok() {
         match clientlib::create_observer(comms.as_ref(), weather, &latest).await {
             Ok(observer) => {
-                futures_join_set.spawn(handle_weather_observer(observer, client.clone(), last.clone()));
+                futures_join_set.spawn(handle_weather_observer(observer, screen.clone(), last.clone()));
             }
             Err(e) => error!("Failed to create observer Weather#WEATHER: {e:?}"),
         }
     }
-    let networks = SubscriberDescriptors::<CatalogWifiNetworks>::WIFI_NETWORKS;
+    let networks = SubscriberDescriptors::<WifiNetworks>::WIFI_NETWORKS;
     if wait_for_publisher_to_be_available(comms.as_ref(), networks).await.is_ok() {
         match clientlib::create_observer(comms.as_ref(), networks, &latest).await {
             Ok(observer) => {
@@ -196,7 +189,7 @@ async fn sdv_main(comms: Arc<dyn Communicate>) -> SdvResult<()> {
             Err(e) => error!("Failed to create observer WifiNetworks#wifi-networks: {e:?}"),
         }
     }
-    let state = SubscriberDescriptors::<CatalogWifiState>::WIFI_STATE;
+    let state = SubscriberDescriptors::<WifiState>::WIFI_STATE;
     if wait_for_publisher_to_be_available(comms.as_ref(), state).await.is_ok() {
         match clientlib::create_observer(comms.as_ref(), state, &latest).await {
             Ok(observer) => {
@@ -205,27 +198,23 @@ async fn sdv_main(comms: Arc<dyn Communicate>) -> SdvResult<()> {
             Err(e) => error!("Failed to create observer WifiState#wifi-state: {e:?}"),
         }
     }
-    let news = SubscriberDescriptors::<CatalogNews>::NEWS;
+    let news = SubscriberDescriptors::<News>::NEWS;
     if wait_for_publisher_to_be_available(comms.as_ref(), news).await.is_ok() {
         match clientlib::create_observer(comms.as_ref(), news, &latest).await {
             Ok(observer) => {
-                futures_join_set.spawn(handle_news_observer(observer, client.clone(), last.clone()));
+                futures_join_set.spawn(handle_news_observer(observer, screen.clone(), last.clone()));
             }
             Err(e) => error!("Failed to create observer NewsFeed#news: {e:?}"),
         }
     }
-    let thumbnails = SubscriberDescriptors::<CatalogThumbnails>::NEWS_THUMBNAILS;
+    let thumbnails = SubscriberDescriptors::<Thumbnails>::NEWS_THUMBNAILS;
     if wait_for_publisher_to_be_available(comms.as_ref(), thumbnails).await.is_ok() {
         match clientlib::create_observer(comms.as_ref(), thumbnails, &latest).await {
             Ok(observer) => {
-                futures_join_set.spawn(handle_thumbnail_observer(observer, client.clone(), last.clone()));
+                futures_join_set.spawn(handle_thumbnail_observer(observer, screen.clone(), last.clone()));
             }
             Err(e) => error!("Failed to create observer NewsThumbnails#news-thumbnails: {e:?}"),
         }
-    }
-    // The screen's commands go to the Wi-Fi bundle's service once it is there.
-    if let Some(wifi) = create_wifi_client(comms.as_ref()).await {
-        futures_join_set.spawn(handle_wifi_commands(screen, Arc::new(wifi)));
     }
     while let Some(e) = futures_join_set.join_next().await {
         error!("Future joined with result: {e:?}");
@@ -233,23 +222,18 @@ async fn sdv_main(comms: Arc<dyn Communicate>) -> SdvResult<()> {
     Ok(())
 }
 
-/// Every message of the weather topic goes to the harry process; the last one is kept.
-async fn handle_weather_observer(
-    mut observer: std::pin::Pin<Box<dyn futures::Stream<Item = SdvResult<Vec<CatalogWeather>>> + Send>>,
-    client: Arc<DashboardServiceClient>,
-    last: Arc<Mutex<Last>>,
-) {
+type Observer<T> = std::pin::Pin<Box<dyn futures::Stream<Item = SdvResult<Vec<T>>> + Send>>;
+
+/// Every message of the weather topic goes to the screen; the last one is kept.
+async fn handle_weather_observer(mut observer: Observer<Weather>, screen: Arc<Screen>, last: Arc<Mutex<Last>>) {
     info!("subscribed to Weather#weather");
     while let Some(message) = observer.next().await {
         match message {
             Ok(messages) => {
-                for message in messages {
-                    // the catalog's type and the gRPC crate's are the same wire format
-                    let Ok(bytes) = message.write_to_bytes() else { continue };
-                    let Ok(weather) = GrpcWeather::parse_from_bytes(&bytes) else { continue };
+                for weather in messages {
                     info!("weather {} °C at {}, {} hours", weather.temperature_c, weather.time, weather.hourly.len());
-                    last.lock().expect("last values").weather = Some(weather.clone());
-                    push_weather(&client, &weather).await;
+                    screen.publish_weather(&weather);
+                    last.lock().expect("last values").weather = Some(weather);
                 }
             }
             Err(e) => error!("Error receiving message on Weather#WEATHER: {e:?}"),
@@ -258,26 +242,19 @@ async fn handle_weather_observer(
     warn!("the weather stream ended");
 }
 
-/// Every feed of the news topic goes to the harry process; the last one is kept.
-async fn handle_news_observer(
-    mut observer: std::pin::Pin<Box<dyn futures::Stream<Item = SdvResult<Vec<CatalogNews>>> + Send>>,
-    client: Arc<DashboardServiceClient>,
-    last: Arc<Mutex<Last>>,
-) {
+/// Every feed of the news topic goes to the screen; the last one is kept.
+async fn handle_news_observer(mut observer: Observer<News>, screen: Arc<Screen>, last: Arc<Mutex<Last>>) {
     info!("subscribed to NewsFeed#news");
     while let Some(message) = observer.next().await {
         match message {
             Ok(messages) => {
-                for message in messages {
-                    let Some(news) = convert::<CatalogNews, GrpcNews>(&message) else { continue };
+                for news in messages {
                     info!("{} news stories", news.stories.len());
-                    {
-                        let mut last = last.lock().expect("last values");
-                        // the thumbnails of stories that left the feed go
-                        last.thumbnails.retain(|id, _| news.stories.iter().any(|s| s.id == *id));
-                        last.news = Some(news.clone());
-                    }
-                    push_news(&client, &news).await;
+                    screen.publish_news(&news);
+                    let mut last = last.lock().expect("last values");
+                    // the thumbnails of stories that left the feed go
+                    last.thumbnails.retain(|id, _| news.stories.iter().any(|s| s.id == *id));
+                    last.news = Some(news);
                 }
             }
             Err(e) => error!("Error receiving message on NewsFeed#news: {e:?}"),
@@ -286,21 +263,16 @@ async fn handle_news_observer(
     warn!("the news stream ended");
 }
 
-/// Every thumbnail goes to the harry process; the ones of the current feed are kept.
-async fn handle_thumbnail_observer(
-    mut observer: std::pin::Pin<Box<dyn futures::Stream<Item = SdvResult<Vec<CatalogThumbnails>>> + Send>>,
-    client: Arc<DashboardServiceClient>,
-    last: Arc<Mutex<Last>>,
-) {
+/// Every thumbnail goes to the screen; the ones of the current feed are kept.
+async fn handle_thumbnail_observer(mut observer: Observer<Thumbnails>, screen: Arc<Screen>, last: Arc<Mutex<Last>>) {
     info!("subscribed to NewsThumbnails#news-thumbnails");
     while let Some(message) = observer.next().await {
         match message {
             Ok(messages) => {
-                for message in messages.iter().flat_map(|m| &m.thumbnails) {
-                    let Some(thumbnail) = convert::<CatalogThumbnail, GrpcThumbnail>(message) else { continue };
+                for thumbnail in messages.into_iter().flat_map(|m| m.thumbnails) {
                     debug!("thumbnail of story {}", thumbnail.id);
-                    last.lock().expect("last values").thumbnails.insert(thumbnail.id, thumbnail.clone());
-                    push_thumbnail(&client, &thumbnail).await;
+                    screen.publish_thumbnail(&thumbnail);
+                    last.lock().expect("last values").thumbnails.insert(thumbnail.id, thumbnail);
                 }
             }
             Err(e) => error!("Error receiving message on NewsThumbnails#news-thumbnails: {e:?}"),
@@ -309,12 +281,8 @@ async fn handle_thumbnail_observer(
     warn!("the thumbnail stream ended");
 }
 
-/// Every message of the networks topic goes to the panel over binder; the last one is kept.
-async fn handle_wifi_networks_observer(
-    mut observer: std::pin::Pin<Box<dyn futures::Stream<Item = SdvResult<Vec<CatalogWifiNetworks>>> + Send>>,
-    screen: Arc<Screen>,
-    last: Arc<Mutex<Last>>,
-) {
+/// Every message of the networks topic goes to the screen; the last one is kept.
+async fn handle_wifi_networks_observer(mut observer: Observer<WifiNetworks>, screen: Arc<Screen>, last: Arc<Mutex<Last>>) {
     info!("subscribed to WifiNetworks#wifi-networks");
     while let Some(message) = observer.next().await {
         match message {
@@ -331,12 +299,8 @@ async fn handle_wifi_networks_observer(
     warn!("the Wi-Fi networks stream ended");
 }
 
-/// Every message of the state topic goes to the panel over binder; the last one is kept.
-async fn handle_wifi_state_observer(
-    mut observer: std::pin::Pin<Box<dyn futures::Stream<Item = SdvResult<Vec<CatalogWifiState>>> + Send>>,
-    screen: Arc<Screen>,
-    last: Arc<Mutex<Last>>,
-) {
+/// Every message of the state topic goes to the screen; the last one is kept.
+async fn handle_wifi_state_observer(mut observer: Observer<WifiState>, screen: Arc<Screen>, last: Arc<Mutex<Last>>) {
     info!("subscribed to WifiState#wifi-state");
     while let Some(message) = observer.next().await {
         match message {
@@ -353,39 +317,34 @@ async fn handle_wifi_state_observer(
     warn!("the Wi-Fi state stream ended");
 }
 
-/// The Matter devices to the screen and the screen's Matter commands to the Matter bundle, once
-/// its publication and its service are there.
-async fn matter_link(comms: Arc<dyn Communicate>, app: Arc<DashboardServiceClient>, last: Arc<Mutex<Last>>) {
+/// The Matter devices to the screen, and the Matter bundle's service for the screen's commands,
+/// once its publication and its service are there.
+async fn matter_link(comms: Arc<dyn Communicate>, screen: Arc<Screen>, last: Arc<Mutex<Last>>, services: Arc<Services>) {
     let Ok(latest) = SubscribeOptions::builder().read_on_subscribe(true).build() else { return };
-    let devices = SubscriberDescriptors::<CatalogMatterDevices>::MATTER_DEVICES;
+    let devices = SubscriberDescriptors::<MatterDevices>::MATTER_DEVICES;
     if wait_for_publisher_to_be_available(comms.as_ref(), devices).await.is_ok() {
         match clientlib::create_observer(comms.as_ref(), devices, &latest).await {
             Ok(observer) => {
-                tokio::spawn(handle_matter_observer(observer, app.clone(), last));
+                tokio::spawn(handle_matter_observer(observer, screen, last));
             }
             Err(e) => error!("Failed to create observer MatterDevices#matter-devices: {e:?}"),
         }
     }
     if let Some(matter) = create_matter_client(comms.as_ref()).await {
-        handle_matter_commands(app, Arc::new(matter)).await;
+        let _ = services.matter.set(Arc::new(matter));
     }
 }
 
-/// Every message of the Matter topic goes to the harry process; the last one is kept.
-async fn handle_matter_observer(
-    mut observer: std::pin::Pin<Box<dyn futures::Stream<Item = SdvResult<Vec<CatalogMatterDevices>>> + Send>>,
-    client: Arc<DashboardServiceClient>,
-    last: Arc<Mutex<Last>>,
-) {
+/// Every message of the Matter topic goes to the screen; the last one is kept.
+async fn handle_matter_observer(mut observer: Observer<MatterDevices>, screen: Arc<Screen>, last: Arc<Mutex<Last>>) {
     info!("subscribed to MatterDevices#matter-devices");
     while let Some(message) = observer.next().await {
         match message {
             Ok(messages) => {
-                for message in messages {
-                    let Some(devices) = convert::<_, GrpcMatterDevices>(&message) else { continue };
+                for devices in messages {
                     debug!("{} Matter nodes", devices.nodes.len());
-                    last.lock().expect("last values").matter_devices = Some(devices.clone());
-                    push_matter_devices(&client, &devices).await;
+                    screen.publish_matter_devices(&devices);
+                    last.lock().expect("last values").matter_devices = Some(devices);
                 }
             }
             Err(e) => error!("Error receiving message on MatterDevices#matter-devices: {e:?}"),
@@ -420,86 +379,14 @@ async fn create_matter_client(comms: &dyn Communicate) -> Option<MatterClient> {
     }
 }
 
-/// The screen's Matter commands, as the Wi-Fi ones (handle_wifi_commands).
-async fn handle_matter_commands(app: Arc<DashboardServiceClient>, matter: Arc<MatterClient>) {
-    loop {
-        match app.matter_commands(&Subscribe::new()) {
-            Ok(mut stream) => {
-                let mut taking = false;
-                while let Some(item) = stream.next().await {
-                    match item {
-                        Ok(command) => {
-                            if !taking {
-                                info!("taking Matter commands from the harry process");
-                                taking = true;
-                            }
-                            let Some(command) = convert::<GrpcMatterCommand, CatalogMatterCommand>(&command) else { continue };
-                            tokio::spawn(call_matter(app.clone(), matter.clone(), command));
-                        }
-                        Err(err) => {
-                            debug!("the Matter command stream ended: {err}");
-                            break;
-                        }
-                    }
-                }
-            }
-            Err(err) => debug!("no Matter command stream: {err}"),
-        }
-        sleep(HEARTBEAT).await;
+/// The Wi-Fi bundle's WifiService for the screen's commands, once it is there.
+async fn find_wifi(comms: Arc<dyn Communicate>, services: Arc<Services>) {
+    if let Some(wifi) = create_wifi_client(comms.as_ref()).await {
+        let _ = services.wifi.set(Arc::new(wifi));
     }
 }
 
-/// One Matter command, then its answer to the screen (a call that did not get through too).
-async fn call_matter(app: Arc<DashboardServiceClient>, matter: Arc<MatterClient>, command: CatalogMatterCommand) {
-    let (name, node_id, endpoint, answer) = match command.command {
-        Some(MatterCmd::Pair(r)) => ("pair", 0, 0, matter.Pair(&r).await),
-        Some(MatterCmd::SetOnOff(r)) => ("on-off", r.node_id, r.endpoint, matter.SetOnOff(&r).await),
-        Some(MatterCmd::MoveToLevel(r)) => ("level", r.node_id, r.endpoint, matter.MoveToLevel(&r).await),
-        Some(MatterCmd::SetSetpoint(r)) => ("setpoint", r.node_id, r.endpoint, matter.SetSetpoint(&r).await),
-        Some(MatterCmd::SetSystemMode(r)) => ("system-mode", r.node_id, r.endpoint, matter.SetSystemMode(&r).await),
-        Some(MatterCmd::SetFanMode(r)) => ("fan-mode", r.node_id, r.endpoint, matter.SetFanMode(&r).await),
-        Some(_) | None => return,
-    };
-    let result = match answer {
-        Ok(result) => {
-            info!("Matter {name} node {node_id:#x} ep{endpoint}: ok {} {:?}", result.ok, result.error);
-            result
-        }
-        Err(e) => {
-            warn!("Matter {name} node {node_id:#x} ep{endpoint}: the call failed: {e:?}");
-            let mut result = CatalogMatterResult::new();
-            result.error = "the Matter service did not answer".to_string();
-            result
-        }
-    };
-    let mut message = MatterCommandResult::new();
-    message.command = name.to_string();
-    message.node_id = node_id;
-    message.endpoint = endpoint;
-    message.result = convert::<CatalogMatterResult, GrpcMatterResult>(&result).into();
-    match app.publish_matter_result_async(&message) {
-        Ok(reply) => {
-            if let Err(e) = reply.await {
-                debug!("the screen did not take the Matter result: {e}");
-            }
-        }
-        Err(e) => debug!("the screen did not take the Matter result: {e}"),
-    }
-}
-
-async fn push_matter_devices(client: &DashboardServiceClient, devices: &GrpcMatterDevices) {
-    match client.publish_matter_devices_async(devices) {
-        Ok(reply) => {
-            if let Err(err) = reply.await {
-                debug!("publish Matter devices: {err}");
-            }
-        }
-        Err(err) => debug!("publish Matter devices: {err}"),
-    }
-}
-
-/// The client of the Wi-Fi bundle's WifiService, once the server is registered (the bundles
-/// start in any order).
+/// The client of the Wi-Fi bundle's WifiService, once the server is registered.
 async fn create_wifi_client(comms: &dyn Communicate) -> Option<WifiClient> {
     let descriptor = ClientDescriptors::<WifiClient>::WIFI;
     let Ok(mut events) = clientlib::create_server_registration_event_stream(comms, descriptor).await else {
@@ -525,50 +412,98 @@ async fn create_wifi_client(comms: &dyn Communicate) -> Option<WifiClient> {
     }
 }
 
-/// The panel over binder: looked for every second; when it is found (it started or
-/// restarted), it gets the last Wi-Fi values and the command sink again.
-async fn handle_screen(screen: Arc<Screen>, last: Arc<Mutex<Last>>) {
+/// The panel over binder: looked for every tick while it is not there; when it is found (it
+/// started or restarted), it gets every last value again. Its death comes as a message.
+async fn handle_screen(screen: Arc<Screen>, last: Arc<Mutex<Last>>, mut deaths: UnboundedReceiver<u64>) {
     loop {
         if screen.connect() {
-            let (networks, state) = {
-                let last = last.lock().expect("last values");
-                (last.wifi_networks.clone(), last.wifi_state.clone())
-            };
-            if let Some(networks) = networks {
-                screen.publish_networks(&networks);
+            resend(&screen, &last);
+        }
+        tokio::select! {
+            Some(generation) = deaths.recv() => screen.on_death(generation),
+            () = sleep(TICK) => {}
+        }
+    }
+}
+
+/// The last values to a panel that starts from nothing.
+fn resend(screen: &Screen, last: &Mutex<Last>) {
+    let (weather, news, thumbnails, networks, state, matter) = {
+        let last = last.lock().expect("last values");
+        (
+            last.weather.clone(),
+            last.news.clone(),
+            last.thumbnails.values().cloned().collect::<Vec<_>>(),
+            last.wifi_networks.clone(),
+            last.wifi_state.clone(),
+            last.matter_devices.clone(),
+        )
+    };
+    if let Some(weather) = weather {
+        screen.publish_weather(&weather);
+    }
+    if let Some(news) = news {
+        screen.publish_news(&news);
+    }
+    for thumbnail in &thumbnails {
+        screen.publish_thumbnail(thumbnail);
+    }
+    if let Some(networks) = networks {
+        screen.publish_networks(&networks);
+    }
+    if let Some(state) = state {
+        screen.publish_state(&state);
+    }
+    if let Some(matter) = matter {
+        screen.publish_matter_devices(&matter);
+    }
+}
+
+/// The screen's commands: the panel calls this bundle's sink (screen.rs) on a binder thread.
+/// Every command is a call of the owning bundle's service in a task of its own (a connect waits
+/// for its outcome; a scan meanwhile does not wait for it), and its answer goes back to the
+/// screen.
+async fn handle_commands(mut commands: UnboundedReceiver<ScreenCommand>, screen: Arc<Screen>, services: Arc<Services>) {
+    while let Some(command) = commands.recv().await {
+        match command {
+            ScreenCommand::Wifi(bytes) => {
+                let Ok(command) = WifiCommand::parse_from_bytes(&bytes) else {
+                    warn!("a Wi-Fi command that does not parse");
+                    continue;
+                };
+                tokio::spawn(call_wifi(screen.clone(), services.wifi.get().cloned(), command));
             }
-            if let Some(state) = state {
-                screen.publish_state(&state);
+            ScreenCommand::Matter(bytes) => {
+                let Ok(command) = MatterCommand::parse_from_bytes(&bytes) else {
+                    warn!("a Matter command that does not parse");
+                    continue;
+                };
+                tokio::spawn(call_matter(screen.clone(), services.matter.get().cloned(), command));
             }
         }
-        sleep(HEARTBEAT).await;
     }
 }
 
-/// The screen's Wi-Fi commands: the panel calls this bundle's sink (screen.rs) on a binder
-/// thread. Every command is a call of the Wi-Fi bundle's service in a task of its own (a
-/// connect waits for its outcome; a scan meanwhile does not wait for it), and its answer goes
-/// back to the screen.
-async fn handle_wifi_commands(screen: Arc<Screen>, wifi: Arc<WifiClient>) {
-    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
-    screen.take_commands(tx);
-    while let Some(bytes) = rx.recv().await {
-        let Ok(command) = CatalogWifiCommand::parse_from_bytes(&bytes) else {
-            warn!("a Wi-Fi command that does not parse");
-            continue;
-        };
-        tokio::spawn(call_wifi(screen.clone(), wifi.clone(), command));
-    }
-}
-
-/// One command: the call, then its answer to the screen (a call that did not get through
+/// One Wi-Fi command: the call, then its answer to the screen (a call that did not get through
 /// is an answer too: the screen must not wait for a connect that never started).
-async fn call_wifi(screen: Arc<Screen>, wifi: Arc<WifiClient>, command: CatalogWifiCommand) {
-    let (name, ssid, answer) = match command.command {
-        Some(Command::Scan(scan)) => ("scan", String::new(), wifi.Scan(&scan).await.map(|_| ok())),
-        Some(Command::Connect(connect)) => ("connect", connect.ssid.clone(), wifi.Connect(&connect).await),
-        Some(Command::Forget(forget)) => ("forget", forget.ssid.clone(), wifi.Forget(&forget).await),
-        Some(Command::Disconnect(disconnect)) => ("disconnect", String::new(), wifi.Disconnect(&disconnect).await),
+async fn call_wifi(screen: Arc<Screen>, wifi: Option<Arc<WifiClient>>, command: WifiCommand) {
+    let (name, ssid) = match &command.command {
+        Some(Command::Scan(_)) => ("scan", String::new()),
+        Some(Command::Connect(c)) => ("connect", c.ssid.clone()),
+        Some(Command::Forget(f)) => ("forget", f.ssid.clone()),
+        Some(Command::Disconnect(_)) => ("disconnect", String::new()),
+        Some(_) | None => return,
+    };
+    let Some(wifi) = wifi else {
+        warn!("Wi-Fi {name} {ssid:?}: the Wi-Fi service is not there yet");
+        screen.publish_wifi_result(name, &ssid, &failed("the Wi-Fi service is not there yet"));
+        return;
+    };
+    let answer = match command.command {
+        Some(Command::Scan(scan)) => wifi.Scan(&scan).await.map(|_| ok()),
+        Some(Command::Connect(connect)) => wifi.Connect(&connect).await,
+        Some(Command::Forget(forget)) => wifi.Forget(&forget).await,
+        Some(Command::Disconnect(disconnect)) => wifi.Disconnect(&disconnect).await,
         Some(_) | None => return,
     };
     // the password is in the request only, never in the log
@@ -579,85 +514,63 @@ async fn call_wifi(screen: Arc<Screen>, wifi: Arc<WifiClient>, command: CatalogW
         }
         Err(e) => {
             warn!("Wi-Fi {name} {ssid:?}: the call failed: {e:?}");
-            let mut result = CatalogWifiResult::new();
-            result.error = "the Wi-Fi service did not answer".to_string();
-            result
+            failed("the Wi-Fi service did not answer")
         }
     };
-    screen.publish_result(name, &ssid, &result);
+    screen.publish_wifi_result(name, &ssid, &result);
 }
 
-fn ok() -> CatalogWifiResult {
-    let mut result = CatalogWifiResult::new();
+fn ok() -> WifiResult {
+    let mut result = WifiResult::new();
     result.ok = true;
     result
 }
 
-/// A heartbeat a second. When the link comes back after a failure, the last values go out
-/// again: the harry process may have restarted and start from nothing.
-async fn handle_heartbeat(client: Arc<DashboardServiceClient>, last: Arc<Mutex<Last>>) {
-    let started = Instant::now();
-    let mut linked = false;
-    loop {
-        sleep(HEARTBEAT).await;
-        let mut request = HeartbeatRequest::new();
-        request.uptime_s = started.elapsed().as_secs();
-        let sent = match client.heartbeat_async(&request) {
-            Ok(reply) => reply.await.is_ok(),
-            Err(_) => false,
-        };
-        if sent && !linked {
-            info!("the harry process is listening");
-            let (weather, news, thumbnails, matter) = {
-                let last = last.lock().expect("last values");
-                (last.weather.clone(), last.news.clone(), last.thumbnails.values().cloned().collect::<Vec<_>>(), last.matter_devices.clone())
-            };
-            if let Some(weather) = weather {
-                push_weather(&client, &weather).await;
-            }
-            if let Some(news) = news {
-                push_news(&client, &news).await;
-            }
-            for thumbnail in &thumbnails {
-                push_thumbnail(&client, thumbnail).await;
-            }
-            if let Some(matter) = matter {
-                push_matter_devices(&client, &matter).await;
-            }
-        } else if !sent && linked {
-            warn!("the harry process is gone, keeping the last values");
+fn failed(error: &str) -> WifiResult {
+    let mut result = WifiResult::new();
+    result.error = error.to_string();
+    result
+}
+
+/// One Matter command, then its answer to the screen (a call that did not get through too).
+async fn call_matter(screen: Arc<Screen>, matter: Option<Arc<MatterClient>>, command: MatterCommand) {
+    let (name, node_id, endpoint) = match &command.command {
+        Some(MatterCmd::Pair(_)) => ("pair", 0, 0),
+        Some(MatterCmd::SetOnOff(r)) => ("on-off", r.node_id, r.endpoint),
+        Some(MatterCmd::MoveToLevel(r)) => ("level", r.node_id, r.endpoint),
+        Some(MatterCmd::SetSetpoint(r)) => ("setpoint", r.node_id, r.endpoint),
+        Some(MatterCmd::SetSystemMode(r)) => ("system-mode", r.node_id, r.endpoint),
+        Some(MatterCmd::SetFanMode(r)) => ("fan-mode", r.node_id, r.endpoint),
+        Some(_) | None => return,
+    };
+    let fail = |error: &str| {
+        let mut result = MatterResult::new();
+        result.error = error.to_string();
+        result
+    };
+    let Some(matter) = matter else {
+        warn!("Matter {name} node {node_id:#x} ep{endpoint}: the Matter service is not there yet");
+        screen.publish_matter_result(name, node_id, endpoint, &fail("the Matter service is not there yet"));
+        return;
+    };
+    let answer = match command.command {
+        Some(MatterCmd::Pair(r)) => matter.Pair(&r).await,
+        Some(MatterCmd::SetOnOff(r)) => matter.SetOnOff(&r).await,
+        Some(MatterCmd::MoveToLevel(r)) => matter.MoveToLevel(&r).await,
+        Some(MatterCmd::SetSetpoint(r)) => matter.SetSetpoint(&r).await,
+        Some(MatterCmd::SetSystemMode(r)) => matter.SetSystemMode(&r).await,
+        Some(MatterCmd::SetFanMode(r)) => matter.SetFanMode(&r).await,
+        Some(_) | None => return,
+    };
+    let result = match answer {
+        Ok(result) => {
+            info!("Matter {name} node {node_id:#x} ep{endpoint}: ok {} {:?}", result.ok, result.error);
+            result
         }
-        linked = sent;
-    }
-}
-
-async fn push_news(client: &DashboardServiceClient, news: &GrpcNews) {
-    if let Err(err) = match client.publish_news_async(news) {
-        Ok(reply) => reply.await.map(|_| ()),
-        Err(err) => Err(err),
-    } {
-        warn!("publish news: {err}; the harry process gets it when it is back");
-    }
-}
-
-async fn push_thumbnail(client: &DashboardServiceClient, thumbnail: &GrpcThumbnail) {
-    if let Err(err) = match client.publish_news_thumbnail_async(thumbnail) {
-        Ok(reply) => reply.await.map(|_| ()),
-        Err(err) => Err(err),
-    } {
-        debug!("publish thumbnail: {err}");
-    }
-}
-
-async fn push_weather(client: &DashboardServiceClient, weather: &GrpcWeather) {
-    let sent = match client.publish_weather_async(weather) {
-        Ok(reply) => reply.await.map_err(|err| warn!("publish weather: {err}")).is_ok(),
-        Err(err) => {
-            warn!("publish weather: {err}");
-            false
+        Err(e) => {
+            warn!("Matter {name} node {node_id:#x} ep{endpoint}: the call failed: {e:?}");
+            fail("the Matter service did not answer")
         }
     };
-    if !sent {
-        warn!("the harry process did not take the weather; it gets it when it is back");
-    }
+    screen.publish_matter_result(name, node_id, endpoint, &result);
 }

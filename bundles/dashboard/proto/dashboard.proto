@@ -1,7 +1,6 @@
-// The local link from the dashboard bundle to the harry process: the bundle is the gRPC
-// client and pushes what the screen shows (the data of the house's topics) and a heartbeat;
-// the harry process is the server on 127.0.0.1 (as HAR's HarSdvServiceBundle pushes to
-// harry-app). The messages are the catalog's.
+// A gRPC link to a harry process on 127.0.0.1. Only hub-app, tv-app and pairs-app build their
+// server against it, until they move to IScreenLink (interfaces/screen); the dashboard bundle
+// does not call it, and the panel (smarthome-app) does not serve it.
 
 syntax = "proto3";
 
