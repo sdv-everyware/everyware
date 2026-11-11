@@ -1,22 +1,24 @@
-# 5. UI: a Figma file and harry
+# 5. UI: a design file and harry
 
-The screen of an SDV Media device is always a Figma design. There is no layout code and no drawing
-API: the designer draws the screen, harry draws the design on the GPU, and the app only says which
-values change.
+The screen of an SDV Media device is always a design file. There is no layout code and no drawing
+API: the design says what is on the screen, harry draws it on the GPU, and the app only says which
+values change. Nobody has to draw the screen by hand: an AI agent writes the design, and a
+designer can open the built `.fig` in Figma to look at it and click its prototype.
 
 ```mermaid
 flowchart LR
-    F["Figma file<br/>layers named #home/title, #room/bedroom/light, ..."]
-    D["design file (.dcf)<br/>in the app's data"]
+    U["you: one sentence<br/>('a kitchen panel with a timer')"] --> AG["an AI agent<br/>writes the design as a patch"]
+    AG --> FIG[".fig file<br/>layers named #home/title, ..."]
+    FIG -.-> DS["a designer, optional<br/>looks at it in Figma"]
+    FIG -- "fig-to-dcf.sh, local,<br/>no Figma account" --> D["design file (.dcf)<br/>in the app's data"]
     APP["harry app<br/>state, actions, presenter"]
     H["harry<br/>layout, display list"]
-    G["GPU -> display"]
-    F -- "fetch script" --> D --> H
-    APP -- "values for named layers" --> H --> G
+    D --> H
+    APP -- "values for named layers" --> H --> G["GPU -> display"]
     T["touch"] -- "tap on #room/bedroom/light" --> APP
 ```
 
-## Why Figma is required
+## Why a design file is required
 
 harry has no API to place or draw elements. Everything visible comes from the design: positions,
 sizes, colours, fonts, images, components and their variants. The app can only change what the
@@ -25,12 +27,20 @@ The image is the one place pixels come from the app: a camera frame, or an exter
 drawing into a texture that harry composes into that layer; the design still says where and how
 big.
 
+The design does not have to come from Figma's servers:
+
+| Way | Who | How |
+|---|---|---|
+| **Agentic** (the default) | an AI agent, following a skill (`new-app`, `ui-component`, `figma-design`) | it writes the screen as a patch of Library components and builds the `.fig` (`design/figma`) |
+| **From the local `.fig`** | the build of any app | `scripts/fig-to-dcf.sh` turns the `.fig` into the `.dcf` on your machine: no import, no file key, no Figma account or token |
+| **Drawn by hand in Figma** | a designer | `scripts/fetch-dcf.sh` fetches the file through Figma's API, with its file key and a token. A Library component drawn in Figma comes in with ui-lib's `design/fetch-library.sh` |
+
 | | |
 |---|---|
-| the designer owns the look | a new look is a new fetch, no code change |
-| one source of truth | what is in Figma is what is on the screen |
+| the look lives in one place | what is in the design is what is on the screen |
+| a new look needs no code change | a new `.dcf` |
 | the app stays small | state, actions, presenter and the layer names; a first screen is a few hundred lines including the build file |
-| the cost | every element the code changes must exist in Figma with a `#name` |
+| the cost | every element the code changes must exist in the design with a `#name` |
 
 ## The contract between design and code
 
@@ -38,7 +48,7 @@ The **layer name** is the contract. A layer `#home/title` in Figma and the field
 `#[Design(node = "#home/title")] title: String` in the app are the same element.
 
 - Only layers the code touches need a `#name`.
-- A hidden layer is not fetched, so the code cannot reach it.
+- A hidden layer is not in the `.dcf`, so the code cannot reach it.
 - The root frame has the display size (for example 1920x1080) and its name is configured in the app.
 - Every font face the design uses must be loaded by the app.
 
@@ -71,7 +81,7 @@ How to write such an app, step by step, with every file:
 ## Key terms
 
 - **harry**: the renderer of HAR (High Availability Renderer); one process owns the display.
-- **.dcf**: the fetched design, a serialized Figma document.
+- **.dcf**: the design as harry reads it, a serialized Figma document, built locally from a `.fig`.
 - **Presenter**: the function that turns the app state into values for the layers.
 
 ## Official documentation
