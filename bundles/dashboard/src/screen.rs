@@ -54,15 +54,21 @@ impl Screen {
     }
 
     /// Looks for the panel when it is not there, and hands it the sink until it takes it;
-    /// true: the panel was found just now (it started or restarted, and starts from nothing).
+    /// true: the panel took the sink just now. A panel that was found starts from nothing (it
+    /// started or restarted), and one that refused until now (it could not ask the identity
+    /// agent, for one) refused every value too: either way it needs every last value now.
+    ///
+    /// Blocking binder calls on the bundle's current-thread runtime: each is a local call to a
+    /// panel that answers at once, once a tick at most while the panel is not linked.
     pub fn connect(&self) -> bool {
         let mut guard = self.link.lock().expect("screen link");
         if let Some(linked) = guard.as_mut() {
             if linked.link.as_binder().is_binder_alive() {
-                if !linked.subscribed {
-                    linked.subscribed = subscribe(&linked.link, &self.sink);
+                if linked.subscribed {
+                    return false;
                 }
-                return false;
+                linked.subscribed = subscribe(&linked.link, &self.sink);
+                return linked.subscribed;
             }
             *guard = None;
         }
@@ -81,7 +87,7 @@ impl Screen {
         info!("the panel serves {SERVICE}");
         let subscribed = subscribe(&link, &self.sink);
         *guard = Some(Linked { link, generation, _death: death, subscribed });
-        true
+        subscribed
     }
 
     /// The panel of this generation died: forget it, if it is the current one.
@@ -127,10 +133,13 @@ impl Screen {
         });
     }
 
-    /// One call to the panel; dropped while it is not there (connect sends the last values).
+    /// One call to the panel; dropped while it is not linked (connect sends the last values).
     fn publish<M: Message>(&self, what: &str, message: &M, call: impl FnOnce(&Strong<dyn IScreenLink>, &[u8]) -> binder::Result<()>) {
-        // not held across the call: a call to a busy panel must not hold up the others' lookups
-        let Some(link) = self.link.lock().expect("screen link").as_ref().map(|l| l.link.clone()) else { return };
+        // Only to a panel that took the sink: it takes a value on the same caller check, and
+        // connect sends every last value once it took the sink. Not held across the call: a call
+        // to a busy panel must not hold up the others' lookups.
+        let link = self.link.lock().expect("screen link").as_ref().filter(|l| l.subscribed).map(|l| l.link.clone());
+        let Some(link) = link else { return };
         let Ok(bytes) = message.write_to_bytes() else { return };
         if let Err(err) = call(&link, &bytes) {
             warn!("publish {what}: {err}");

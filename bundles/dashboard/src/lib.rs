@@ -412,8 +412,9 @@ async fn create_wifi_client(comms: &dyn Communicate) -> Option<WifiClient> {
     }
 }
 
-/// The panel over binder: looked for every tick while it is not there; when it is found (it
-/// started or restarted), it gets every last value again. Its death comes as a message.
+/// The panel over binder: looked for every tick while it is not there, and handed the sink
+/// until it takes it; once it took it (it started, restarted, or stopped refusing), it gets
+/// every last value again. Its death comes as a message.
 async fn handle_screen(screen: Arc<Screen>, last: Arc<Mutex<Last>>, mut deaths: UnboundedReceiver<u64>) {
     loop {
         if screen.connect() {
