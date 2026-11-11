@@ -126,7 +126,7 @@ The same UI library, three apps, captured on the reference board (1920 x 1080 ov
 <td width="50%"><img src="docs/assets/hub-app-rb3.png" alt="hub-app: the camera, the climate control and a grid of room tiles"></td>
 </tr>
 <tr>
-<td align="center"><sub><code>tv-app</code>, a smart TV home screen, the reference app</sub></td>
+<td align="center"><sub><code>tv-app</code>, a smart TV home screen</sub></td>
 <td align="center"><sub><code>hub-app</code>, the rooms of the house</sub></td>
 </tr>
 </table>
@@ -175,7 +175,7 @@ manifest and the two forks in the tree (Google's harry, Linaro's board support) 
 |---|---|---|
 | [`everyware`](https://github.com/sdv-everyware/everyware) (this one) | `vendor/sdv-everyware/everyware` | the service bundles, their catalog and policies, the product additions, the design tools, the documentation |
 | [`ui-lib`](https://github.com/sdv-everyware/ui-lib) | `vendor/sdv-everyware/ui-lib` | the UI library: components by role, their behaviour, the Library as a Figma file and as a `.dcf` |
-| [`smarthome-app`](https://github.com/sdv-everyware/smarthome-app), [`tv-app`](https://github.com/sdv-everyware/tv-app), [`hub-app`](https://github.com/sdv-everyware/hub-app), [`pairs-app`](https://github.com/sdv-everyware/pairs-app) | `packages/services/display_safety/utils/<name>` | the apps on harry; `tv-app` is the reference app of the library; `smarthome-app` is the smart home panel |
+| [`template-app`](https://github.com/sdv-everyware/template-app), [`smarthome-app`](https://github.com/sdv-everyware/smarthome-app), [`tv-app`](https://github.com/sdv-everyware/tv-app), [`hub-app`](https://github.com/sdv-everyware/hub-app), [`pairs-app`](https://github.com/sdv-everyware/pairs-app) | `packages/services/display_safety/utils/<name>` | the apps on harry; `template-app` is the template of a new app (`ui-lib`'s `new-app.sh` copies it); `smarthome-app` is the smart home panel |
 | [`super-harry`](https://github.com/sdv-everyware/super-harry) | `packages/services/display_safety` | the same harry as AOSP, only faster, touchier and friendlier with Wayland |
 | [`device-rb3`](https://github.com/sdv-everyware/device-rb3) | `device/rb3/sdv_media_db845c` | the product of the reference board: SDV Media's core, the display, the network, the bundles. A new target is a repository like this one |
 | [`dragonboard`](https://github.com/sdv-everyware/dragonboard) | `device/linaro/dragonboard` | Linaro's support for the reference board, with one policy change |
@@ -219,8 +219,9 @@ m
 
 Flashing the reference board and what runs on it: the README of
 [`device-rb3`](https://github.com/sdv-everyware/device-rb3). Writing your first app on the UI
-library: start from [`tv-app`](https://github.com/sdv-everyware/tv-app), the reference app, until
-the app template has its own repository.
+library: `vendor/sdv-everyware/ui-lib/scripts/new-app.sh <name>` copies
+[`template-app`](https://github.com/sdv-everyware/template-app), or a coding agent does it with the
+`new-app` skill.
 
 ## Status and roadmap
 
