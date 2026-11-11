@@ -176,7 +176,7 @@ manifest and the two forks in the tree (Google's harry, Linaro's board support) 
 | [`everyware`](https://github.com/sdv-everyware/everyware) (this one) | `vendor/sdv-everyware/everyware` | the service bundles, their catalog and policies, the product additions, the design tools, the documentation |
 | [`ui-lib`](https://github.com/sdv-everyware/ui-lib) | `vendor/sdv-everyware/ui-lib` | the UI library: components by role, their behaviour, the Library as a Figma file and as a `.dcf` |
 | [`smarthome-app`](https://github.com/sdv-everyware/smarthome-app), [`tv-app`](https://github.com/sdv-everyware/tv-app), [`hub-app`](https://github.com/sdv-everyware/hub-app), [`pairs-app`](https://github.com/sdv-everyware/pairs-app) | `packages/services/display_safety/utils/<name>` | the apps on harry; `tv-app` is the reference app of the library; `smarthome-app` is the smart home panel |
-| [`super-harry`](https://github.com/sdv-everyware/super-harry) | `packages/services/display_safety` | harry as AOSP has it, plus the commits a 1080p touch panel needs |
+| [`super-harry`](https://github.com/sdv-everyware/super-harry) | `packages/services/display_safety` | the same harry as AOSP, only faster, touchier and friendlier with Wayland |
 | [`device-rb3`](https://github.com/sdv-everyware/device-rb3) | `device/rb3/sdv_media_db845c` | the product of the reference board: SDV Media's core, the display, the network, the bundles. A new target is a repository like this one |
 | [`dragonboard`](https://github.com/sdv-everyware/dragonboard) | `device/linaro/dragonboard` | Linaro's support for the reference board, with one policy change |
 | [`dnsproxyd`](https://github.com/sdv-everyware/dnsproxyd) | `vendor/sdv-everyware/dnsproxyd` | name resolution for a device without netd |
