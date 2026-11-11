@@ -1,0 +1,40 @@
+// The link between the screen (the panel app, a vendor APEX) and the dashboard bundle (product):
+// a stable AIDL interface, because the two sides are built and updated on two sides of Treble.
+// The values are the catalog's protobuf messages (catalog/*.proto) as bytes: one schema, and the
+// interface only freezes the envelope. Shaped as the Thread HAL (hardware/interfaces/threadnetwork).
+
+package {
+    default_applicable_licenses: ["Android-Apache-2.0"],
+}
+
+aidl_interface {
+    name: "com.everyware.screen",
+    srcs: ["com/everyware/screen/*.aidl"],
+    stability: "vintf",
+    owner: "everyware",
+    vendor_available: true,
+    product_available: true,
+    min_sdk_version: "34",
+    backend: {
+        rust: {
+            enabled: true,
+            apex_available: [
+                "//apex_available:platform",
+                "//apex_available:anyapex",
+            ],
+        },
+        cpp: {
+            enabled: false,
+        },
+        ndk: {
+            enabled: false,
+        },
+        java: {
+            enabled: false,
+        },
+    },
+    // Not frozen while the link is in development: change it freely, then
+    // `m com.everyware.screen-update-api`. Freeze version 1 before the first release
+    // (`m com.everyware.screen-freeze-api`): a release build only uses frozen versions.
+    frozen: false,
+}

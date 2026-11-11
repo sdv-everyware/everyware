@@ -21,14 +21,12 @@ service DashboardService {
     rpc PublishNews(com.everyware.NewsFeed) returns (Ack);
     // The thumbnail of a story of the feed (one of the topic "news-thumbnails"), likewise.
     rpc PublishNewsThumbnail(com.everyware.NewsThumbnail) returns (Ack);
-    // The Wi-Fi of the house (topics "wifi-networks", "wifi-state"), likewise.
+    // Wi-Fi is not on this link: it goes over binder (interfaces/screen, IScreenLink), where the
+    // panel knows the caller. smarthome-app fails these four with PERMISSION_DENIED; they stay
+    // until the other apps (hub-app, tv-app) drop them.
     rpc PublishWifiNetworks(com.everyware.WifiNetworks) returns (Ack);
     rpc PublishWifiState(com.everyware.WifiState) returns (Ack);
-    // The screen's commands for the Wi-Fi bundle: the bridge opens this stream once it is
-    // connected and calls the bundle's WifiService (wifi_service.proto) for every command.
     rpc WifiCommands(Subscribe) returns (stream com.everyware.WifiCommand);
-    // The answer to a command, once the Wi-Fi bundle gave it (a connect: when the network
-    // is joined or the attempt failed), or why the call did not get through.
     rpc PublishWifiResult(WifiCommandResult) returns (Ack);
     // The Matter devices of the house (topic "matter-devices"), on every update and again after
     // a reconnect.

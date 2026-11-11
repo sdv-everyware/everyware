@@ -27,6 +27,9 @@ rust_ffi_shared {
         // the local link to the harry process (proto/dashboard.proto)
         "libgrpcio",
         "libeveryware_dashboard_grpc",
+        // Wi-Fi to the panel over binder (src/screen.rs, interfaces/screen)
+        "libbinder_rs",
+        "com.everyware.screen-V1-rust",
     ],
     proc_macros: ["libasync_trait"],
     apex_available: [
