@@ -18,6 +18,7 @@
 
 package com.everyware.screen;
 @VintfStability
-interface IWifiCommandSink {
-  oneway void onCommand(in byte[] command);
+interface ICommandSink {
+  oneway void onWifiCommand(in byte[] command);
+  oneway void onMatterCommand(in byte[] command);
 }

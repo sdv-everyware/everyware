@@ -19,8 +19,13 @@
 package com.everyware.screen;
 @VintfStability
 interface IScreenLink {
+  void publishWeather(in byte[] weather);
+  void publishNews(in byte[] news);
+  void publishNewsThumbnail(in byte[] thumbnail);
   void publishWifiNetworks(in byte[] networks);
   void publishWifiState(in byte[] state);
   void publishWifiResult(@utf8InCpp String command, @utf8InCpp String ssid, in byte[] result);
-  void subscribeWifiCommands(in com.everyware.screen.IWifiCommandSink sink);
+  void publishMatterDevices(in byte[] devices);
+  void publishMatterResult(@utf8InCpp String command, long nodeId, int endpoint, in byte[] result);
+  void subscribeCommands(in com.everyware.screen.ICommandSink sink);
 }
