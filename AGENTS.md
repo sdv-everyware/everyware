@@ -14,7 +14,7 @@ Read this file, then the `AGENTS.md` nearest to your change, then the skill for 
 |---|---|---|
 | `vendor/sdv-everyware/everyware` | service bundles, the catalog, the product, the docs (`docs/`), the Figma tools (`design/figma/`), scripts | this file |
 | `vendor/sdv-everyware/ui-lib` | the UI library: components and nothing else | `vendor/sdv-everyware/ui-lib/AGENTS.md` |
-| `packages/services/display_safety/utils/<name>-app` | one app each (smarthome, hub, tv, pairs, ...): its code, its design, its content | the app's `AGENTS.md` |
+| `packages/services/display_safety/utils/<name>-app` | one app each (smarthome, hub, tv, pairs, ...): its code, its design, its content; `template-app` is the template a new app is copied from | the app's `AGENTS.md` |
 | `vendor/sdv-everyware/third_party/rust` | vendored Rust crates (rs-matter) | |
 | `vendor/sdv-everyware/dnsproxyd` | the DNS proxy for the bundles | |
 | `device/rb3/sdv_media_db845c` | the product of the reference board (Qualcomm RB3) | its README |
