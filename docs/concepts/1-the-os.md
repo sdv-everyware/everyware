@@ -66,7 +66,7 @@ and no VirtIO: the SDV software boots straight on the board, with the board's ow
 | Kernel | GKI (6.6 by default) with VirtIO modules | GKI too (6.12), with the board's modules |
 | Isolation | between the VMs | none: one system |
 | The SDV software | `sdv_core_base.mk`, `sdv_samples_media.mk` | the same two |
-| The device layer | `sdv_core_arm64.mk`, `sdv_media_base.mk` (the VM's graphics), `sdv_core_base/BoardConfig.mk` and `sdv_core_arm64/BoardConfig.mk` (the VirtIO modules) | `device-rb3` on Linaro's RB3 board support |
+| The device layer | `sdv_core_arm64.mk`, `sdv_media_base.mk` (the VM's graphics), `sdv_core_base/`, `sdv_core_arm64/` and `sdv_media_base/BoardConfig.mk` (the VirtIO modules) | `device-rb3` on Linaro's RB3 board support |
 
 To run it in a VM again, swap the device layer for Google's and boot it on a board with a
 hypervisor.
