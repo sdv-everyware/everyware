@@ -15,7 +15,8 @@
 #   ./vendor/sdv-everyware/everyware/scripts/run-smarthome-rb3.sh all    # m smarthome_app first
 #   ./vendor/sdv-everyware/everyware/scripts/run-smarthome-rb3.sh stop   # kill the dev build, start the installed panel again
 #
-# Env: SERIAL (default 6aeccbe4), TOUCH_SIZE=WxH (default: the first HDMI mode)
+# Env: SERIAL (default 6aeccbe4), TOUCH_SIZE=WxH (default: the first HDMI mode),
+#      SMARTHOME_LOG=debug|trace (the panel's own log level, main.rs)
 set -e
 TREE="$(cd "$(dirname "$0")/../../../.." && pwd)"
 APP="$TREE/packages/services/display_safety/utils/smarthome-app"
@@ -28,8 +29,12 @@ A() { adb -s "$SERIAL" "$@"; }
 
 if [ "$MODE" = "all" ]; then
   echo ">> build smarthome_app (tools/env.sh: lunch sdv_media_db845c, OUT_DIR=out_rb3)"
+  # the APEX variant, the one pushed below: `m smarthome_app` builds only the platform
+  # variant, and the APEX one stays as it was (a dev run of an old binary)
+  VARIANT=$(ls -td "$TREE"/out_rb3/soong/.intermediates/packages/services/display_safety/utils/smarthome-app/smarthome_app/android_vendor_arm64_*_apex* 2>/dev/null | head -1)
+  TARGET=${VARIANT:+${VARIANT#$TREE/}/smarthome_app}
   ( cd "$TREE" && source device/rb3/sdv_media_db845c/tools/env.sh >/dev/null \
-      && m smarthome_app ) || { echo "!! build failed"; exit 1; }
+      && m ${TARGET:-com.everyware.smarthome} ) || { echo "!! build failed"; exit 1; }
 fi
 
 echo ">> adb root ($SERIAL)"
@@ -84,8 +89,20 @@ fi
 [ -n "$TOUCH_SIZE" ] || { echo "!! HDMI has no modes (cable/monitor?); set TOUCH_SIZE=WxH"; exit 1; }
 echo ">> touch mapped to $TOUCH_SIZE"
 
+# On an image with the panel APEX the dev build stands in for the service smarthome, so it
+# runs as the service does (the APEX's init rc): the Wayland zones in the runtime directory,
+# where the browser (everyware-browser.sh) finds the socket and its FIFOs. Without this the
+# browser looks for a socket nobody serves.
+SERVICE=""
+if [ -n "$(A shell getprop init.svc.smarthome | tr -d '\r')" ]; then
+  RUN=/data/vendor/everyware/run
+  SERVICE="XDG_RUNTIME_DIR=$RUN HAR_BROWSER_FIFO=$RUN/har-browser-open HAR_BROWSER_EVENTS=$RUN/har-browser-events"
+  ZONES="--wayland-zones --zone-plane"
+fi
+
 # log.tag INFO: the image has none, harry would log VERBOSE. minigbm nocompression: harry's
 # minigbm allocates UBWC scanout buffers that mesa renders uncompressed (noise on screen).
 echo ">> run smarthome_app (logs: adb -s $SERIAL logcat -s smarthome-app; stop: $0 stop)"
 A shell "setprop log.tag INFO; setprop vendor.minigbm.debug nocompression; \
-  LD_LIBRARY_PATH=$LDP /data/local/tmp/smarthome_app -d $REMOTE_DATA -i smarthome --touch-size $TOUCH_SIZE"
+  $SERVICE SMARTHOME_LOG=${SMARTHOME_LOG:-info} LD_LIBRARY_PATH=$LDP \
+  /data/local/tmp/smarthome_app -d $REMOTE_DATA -i smarthome --touch-size $TOUCH_SIZE ${ZONES:-}"

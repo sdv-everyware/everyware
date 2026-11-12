@@ -6,7 +6,9 @@
 #
 # The three processes are children of this script, as the supplicant is of net_bringup.sh:
 # init knows one service. When one of them ends, or the panel's socket goes (the panel
-# restarted), all three are stopped and started again.
+# restarted, or stopped and nobody listens any more), all three are stopped and started again
+# once the panel listens. Cog does not end when the compositor goes away: it stays on the dead
+# connection and spins one core, so the script must not leave it running without a panel.
 # Without a Debian root on the device there is no browser: the script says so and ends.
 RUN=/data/vendor/everyware/run
 R=/data/glibc/rootfs
@@ -34,11 +36,16 @@ stop_all() {
     sleep 1
     pkill -9 -U $BROWSER_ID 2>/dev/null
 }
+# The panel listens on its socket: the file alone is not enough, it stays behind when the
+# panel is stopped or dies (a listening socket: flags __SO_ACCEPTCON, state unconnected). The
+# kernel pads the inode to five places, so a small one comes after more than one space.
+listening() { grep -q -E " 00010000 0001 01 +[0-9]+ $RUN/har-display\$" /proc/net/unix; }
+
 # a TERM by hand or at shutdown; `stop everyware_browser` kills the whole process group itself
 trap 'stop_all; exit 0' TERM INT
 
 while :; do
-    until [ -S $RUN/har-display ]; do sleep 1; done
+    until [ -S $RUN/har-display ] && listening; do sleep 1; done
     # the panel made the socket for itself; the browser's group has to reach it
     chown root:$BROWSER_ID $RUN/har-display
     chmod 0660 $RUN/har-display
@@ -76,7 +83,7 @@ while :; do
     fi
 
     while kill -0 $bus 2>/dev/null && kill -0 $cog 2>/dev/null && kill -0 $relay 2>/dev/null \
-        && [ "$(stat -c '%i %z' $RUN/har-display 2>/dev/null)" = "$socket" ]; do
+        && [ "$(stat -c '%i %z' $RUN/har-display 2>/dev/null)" = "$socket" ] && listening; do
         sleep 2
     done
     log "a part of the browser ended or the panel's socket went: starting it again"
