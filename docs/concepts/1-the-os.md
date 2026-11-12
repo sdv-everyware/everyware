@@ -53,6 +53,24 @@ to the display (page 5).
 Nothing in it is specific to cars: a device that needs a fast, secure, updatable OS with a good
 looking screen and no app store needs exactly this.
 
+## In a car and here
+
+In a car, SDV Media is a virtual machine. It runs on a type 1 hypervisor (QNX, Gunyah) next to
+the infotainment's Android and reaches the hardware through VirtIO. Here there is no hypervisor
+and no VirtIO: the SDV software boots straight on the board, with the board's own drivers.
+
+| | In a car (Google) | Here (SDV EveryWare) |
+|---|---|---|
+| Runs as | a VM on a type 1 hypervisor | the only system on the board |
+| Hardware | VirtIO devices: gpu, sound, network, disk, camera | the board's drivers: GPU, audio, Wi-Fi, disk, USB |
+| Kernel | GKI with VirtIO modules | the same GKI with the board's modules |
+| Isolation | between the VMs | none: one system |
+| The SDV software | `sdv_core_base.mk`, `sdv_samples_media.mk` | the same two |
+| The device layer | `sdv_core_arm64.mk`, `sdv_media_base.mk`, the VirtIO board config | `device-rb3` on Linaro's RB3 board support |
+
+To run it in a VM again, swap the device layer for Google's and boot it on a board with a
+hypervisor.
+
 ## Measured on the Qualcomm RB3 (2026-11-03)
 
 Board: Qualcomm Robotics RB3 (SDA845, 8 cores, 3.5 GB RAM), image `sdv_media_db845c` userdebug,
@@ -81,6 +99,7 @@ other values; the earliest kernel lines had already left the log buffer.
 - [AAOS SDV system architecture](https://source.android.com/docs/automotive/sdv/sdv-system-architecture)
 - [AAOS SDV terminology and glossary](https://source.android.com/docs/automotive/sdv/overview/terminology)
 - [Get started with the software defined vehicle](https://source.android.com/docs/automotive/sdv/getting-started)
+- [SDV on QNX](https://source.android.com/docs/automotive/sdv/workstreams/hardware/sdv-on-qnx): SDV Media as a VM on a type 1 hypervisor
 
 ## What's next
 
