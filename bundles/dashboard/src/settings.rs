@@ -40,6 +40,7 @@ use user_preferences_api::user_preferences_management_service::{
 const GROUPS: [(&str, &str, &str); 2] =
     [("com.everyware.system", "SystemServiceBundle", "time"), ("com.everyware.system", "SystemServiceBundle", "units")];
 /// The only caller of the notifier: user_preferences (its sample APEX).
+const USER_PREFERENCES_PACKAGE: &str = "com.android.sdv.sample.user_preferences";
 const USER_PREFERENCES_BUNDLE: &str = "UserPreferencesServiceBundle";
 /// How long a subscribe waits before it tries again: the owner registers its group after it
 /// started, and user_preferences answers NotFound until then.
@@ -60,7 +61,9 @@ impl ChangeNotifier for Notifier {
     ) -> SdvResult<OnSettingsChangeResponse> {
         // The authz policy lets any client with the right declaration call; only
         // user_preferences reports settings.
-        if caller_id.get_service_bundle_name() != USER_PREFERENCES_BUNDLE {
+        if caller_id.get_sdv_package_name() != USER_PREFERENCES_PACKAGE
+            || caller_id.get_service_bundle_name() != USER_PREFERENCES_BUNDLE
+        {
             warn!("settings change from {caller_id}: not user_preferences, dropped");
             return Err(SdvStatus::new(SdvStatusCode::PermissionDenied));
         }
