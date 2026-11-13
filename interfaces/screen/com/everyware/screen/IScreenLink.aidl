@@ -53,4 +53,16 @@ interface IScreenLink {
      * subscribe.
      */
     void subscribeCommands(in ICommandSink sink);
+
+    /**
+     * A settings group of the device (after subscribeCommands: a new method goes last, so a
+     * panel built before it keeps the numbers of the others), as user_preferences reports it: a
+     * com.android.sdv.user_preferences.OnSettingsChangeRequest: the group's id and its active
+     * values. The message is Google's, there is no proto of ours for it:
+     * system/software_defined_vehicle/automotive_services/user_preferences/vsidl/v1/change_notifier.proto
+     * (Setting in setting.proto, SettingsGroupId in settings_group.proto, same folder). The keys
+     * and groups are the owner's: bundles/system/src/lib.rs (TIMEZONE, HOUR_CYCLE_24, TEMPERATURE).
+     * Sent for each group the bundle follows, at subscribe and on every change.
+     */
+    void publishSettings(in byte[] settings);
 }

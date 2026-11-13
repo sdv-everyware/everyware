@@ -23,6 +23,7 @@ const SERVICE: &str = "com.everyware.screen.IScreenLink/default";
 pub enum ScreenCommand {
     Wifi(Vec<u8>),
     Matter(Vec<u8>),
+    Settings(Vec<u8>),
 }
 
 /// The panel's end while it is there, and this bundle's command sink.
@@ -133,6 +134,10 @@ impl Screen {
         });
     }
 
+    pub fn publish_settings<M: Message>(&self, settings: &M) {
+        self.publish("settings", settings, |link, bytes| link.publishSettings(bytes));
+    }
+
     /// One call to the panel; dropped while it is not linked (connect sends the last values).
     fn publish<M: Message>(&self, what: &str, message: &M, call: impl FnOnce(&Strong<dyn IScreenLink>, &[u8]) -> binder::Result<()>) {
         // Only to a panel that took the sink: it takes a value on the same caller check, and
@@ -176,6 +181,11 @@ impl ICommandSink for Sink {
 
     fn onMatterCommand(&self, command: &[u8]) -> binder::Result<()> {
         let _ = self.commands.send(ScreenCommand::Matter(command.to_vec()));
+        Ok(())
+    }
+
+    fn onSettingsChange(&self, request: &[u8]) -> binder::Result<()> {
+        let _ = self.commands.send(ScreenCommand::Settings(request.to_vec()));
         Ok(())
     }
 }

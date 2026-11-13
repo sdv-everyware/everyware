@@ -68,6 +68,32 @@ screen never waits for a connect that never started (decisions.md, 2026-11-06).
   `com.everyware.WifiService` on the channel `wifi` and of `com.everyware.MatterService` on the
   channel `matter`.
 
+## Settings
+
+The bridge shows the device's settings on the screen as Google's HMI sample does
+(`system/software_defined_vehicle/samples/user_preferences/v1/hmi_service`), in `src/settings.rs`:
+
+```
+ settings sheet --onSettingsChange (RequestSettingsChangeRequest)--> bridge
+ bridge --RequestSettingsChange, NON_PERSISTENT--> user_preferences --> System bundle applies
+ user_preferences --ChangeNotifier.OnSettingsChange--> bridge
+ bridge --publishSettings (OnSettingsChangeRequest)--> settings sheet
+```
+
+- It finds the owner of the groups `time` and `units` by service discovery of the
+  UserControllableServices, then subscribes to each group at UserPreferencesManagementService
+  and serves the ChangeNotifier. Its authz policy has the three, as the HMI sample's.
+- The screen gets Google's messages as they are; a new setting needs no new method.
+- A change is NON_PERSISTENT: the groups are SHARED, so the System bundle keeps the value.
+  A PERSISTENT change would be stored per user, and the device has no users.
+- A notification carries only the keys that changed; the bridge merges it into the group it
+  keeps, so a panel that comes back gets the whole group.
+- user_preferences keeps its subscribers in memory only: when its server registers again (it
+  restarted), the bridge subscribes to every group again. Google's sample is not restartable
+  (its orchestration config), so today it comes back only with a reboot.
+- It takes a change only for a group it follows, and a notification only from user_preferences.
+  A change that fails sends the group's last values again, so the screen drops what it showed.
+
 ## Security
 
 - The bridge is the only client of `WifiService`: a command reaches the Wi-Fi bundle only

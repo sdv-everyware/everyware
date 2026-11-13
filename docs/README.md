@@ -3,6 +3,9 @@
 SDV Media as the operating system of an embedded device, shown as a smart home panel on the
 Qualcomm RB3 together with a second SDV Media device.
 
+New here and want to add a feature? Start with [Getting started](getting-started.md): from a tap
+on the screen to the device, in four steps with an example to copy for each.
+
 Read the concepts in order; each page has one idea, one diagram and a link to the next.
 
 ## Concepts: what and why

@@ -55,6 +55,8 @@ genrule {
         ":everyware_catalog_files",
         ":sdv_vsidl_v1_protos",
         ":everyware_catalog_protos_only",
+        // SystemServiceBundle serves and calls user_preferences' services
+        ":user_preferences_v1_catalog_files",
     ],
     tools: [
         "vsidlc",
@@ -68,6 +70,6 @@ genrule {
         "'$(locations :everyware_catalog_files)' " +
         "$(genDir) " +
         "$(out)" +
-        " '$(locations :everyware_catalog_protos_only)'" +
+        " '$(locations :everyware_catalog_protos_only) $(locations :user_preferences_v1_catalog_files)'" +
         " -- --target-api latest",
 }

@@ -122,4 +122,41 @@ service_bundle {
         service: "MatterService"
         channel: "matter"
     }
+
+    # The device's settings for the screen, as Google's HMI sample takes them: it subscribes to a
+    # settings group and asks for changes, and user_preferences calls it back on every change.
+    client {
+        service: "com.android.sdv.user_preferences.UserPreferencesManagementService"
+        channel: "com-android-sdv-user-preferences-user-preferences-management-service"
+    }
+
+    server {
+        service: "com.android.sdv.user_preferences.view.ChangeNotifier"
+        channel: "com-android-sdv-user-preferences-view-change-notifier"
+    }
+
+    # Only to find a group's owner (service discovery of the UserControllableServices), as the
+    # HMI sample declares it; the changes go through user_preferences.
+    client {
+        service: "com.android.sdv.user_preferences.user_controllable.UserControllableService"
+        channel: "com-android-sdv-user-preferences-user-controllable-user-controllable-service"
+    }
+}
+
+# Owns the system settings of the device: the time zone and the clock's format. It keeps them
+# in SDV's user_preferences as a user-controllable service: registers them, applies a change
+# and reports the value in force. The services are user_preferences' own (its catalog, a
+# dependency of this one).
+service_bundle {
+    name: "SystemServiceBundle"
+
+    server {
+        service: "com.android.sdv.user_preferences.user_controllable.UserControllableService"
+        channel: "com-android-sdv-user-preferences-user-controllable-user-controllable-service"
+    }
+
+    client {
+        service: "com.android.sdv.user_preferences.UserPreferencesRegistryService"
+        channel: "com-android-sdv-user-preferences-user-preferences-registry-service"
+    }
 }

@@ -1,10 +1,16 @@
 # SELinux domains of the service bundles that do not run in the default one
 # (untrusted_service_bundle). Read at boot by the SDV lifecycle manager
-# (system/software_defined_vehicle/lifecycle_management, selinux_policy_reader.rs):
-#   <package>.<BundleName>   <domain>
+# (system/software_defined_vehicle/lifecycle_management, agent.rs and selinux_policy_reader.rs):
+#   <APEX package>.<BundleName>   <full SELinux context>
+# The package is the bundle's APEX (com.everyware.wifi), not the catalog's (com.everyware), and
+# the context goes to setexeccon() as written. A line that does not match leaves the bundle in
+# the default domain without an error.
 # The Wi-Fi bundle talks to wpa_supplicant's control interface, which no other bundle may
 # (device/rb3/sdv_media_db845c/sepolicy, bundles/wifi/README.md).
-com.everyware.WifiServiceBundle wifi_service_bundle
+com.everyware.wifi.WifiServiceBundle u:r:wifi_service_bundle:s0
 # The Matter bundle speaks Matter on the house's network: UDP and mDNS multicast, which the
 # default domain has not (device/rb3/sdv_media_db845c/sepolicy, bundles/matter/README.md).
-com.everyware.MatterServiceBundle matter_service_bundle
+com.everyware.matter.MatterServiceBundle u:r:matter_service_bundle:s0
+# The System bundle sets the time zone (persist.sys.timezone), which no other bundle may
+# (device/rb3/sdv_media_db845c/sepolicy, bundles/system/README.md).
+com.everyware.system.SystemServiceBundle u:r:system_service_bundle:s0

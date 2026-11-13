@@ -24,6 +24,10 @@ rust_ffi_shared {
         "libsdv_status_rs",
         "libcom_everyware_wifi_service_rpc_rs",
         "libcom_everyware_matter_service_rpc_rs",
+        // the device's settings (src/settings.rs)
+        "libuser_preferences_api_stable",
+        "libcom_android_sdv_user_preferences_user_preferences_management_service_rpc_rs",
+        "libcom_android_sdv_user_preferences_view_change_notifier_rpc_rs",
         // the link to the panel, over binder (src/screen.rs, interfaces/screen)
         "libbinder_rs",
         "com.everyware.screen-V1-rust",

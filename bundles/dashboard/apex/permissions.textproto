@@ -36,3 +36,16 @@ client {
   service: "com.everyware.MatterService"
   channel: "matter"
 }
+client {
+  service: "com.android.sdv.user_preferences.UserPreferencesManagementService"
+  channel: "com-android-sdv-user-preferences-user-preferences-management-service"
+}
+server {
+  service: "com.android.sdv.user_preferences.view.ChangeNotifier"
+  channel: "com-android-sdv-user-preferences-view-change-notifier"
+}
+# only to find the owner of a settings group (service discovery), as Google's HMI sample
+client {
+  service: "com.android.sdv.user_preferences.user_controllable.UserControllableService"
+  channel: "com-android-sdv-user-preferences-user-controllable-user-controllable-service"
+}

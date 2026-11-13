@@ -34,6 +34,7 @@ use tokio::time::sleep;
 use tokio_util::sync::CancellationToken;
 
 mod screen;
+mod settings;
 use screen::{Screen, ScreenCommand};
 
 /// How often the panel is looked for while it is not there, and the sink handed again while it
@@ -68,6 +69,8 @@ struct Last {
     wifi_networks: Option<WifiNetworks>,
     wifi_state: Option<WifiState>,
     matter_devices: Option<MatterDevices>,
+    /// The settings groups the screen shows, by name (settings.rs).
+    settings: std::collections::BTreeMap<String, user_preferences_api::change_notifier::OnSettingsChangeRequest>,
 }
 
 /// The services the screen's commands go to, once they are there (the bundles start in any
@@ -106,7 +109,7 @@ impl ServiceBundle for DashboardServiceBundle {
             runtime.block_on(async move {
                 let comms = Arc::new(SdvComms { context });
                 let res = tokio::select! {
-                    res = sdv_main(comms) => res,
+                    res = sdv_main(context, comms) => res,
                     () = cancellation_token.cancelled() => Err(sdv::status::SdvStatus::new(sdv::status::SdvStatusCode::Cancelled)),
                 };
                 error!("Service bundle loop stopped: {res:?}.");
@@ -140,9 +143,16 @@ async fn wait_for_publisher_to_be_available<Proto: protobuf::Message + Debug>(
     Ok(())
 }
 
-async fn sdv_main(comms: Arc<dyn Communicate>) -> SdvResult<()> {
+async fn sdv_main(context: ContextRef, comms: Arc<dyn Communicate>) -> SdvResult<()> {
     info!("Starting service bundle 'DashboardServiceBundle'");
-    let _service_bundle = match Bundle::builder().set_comms(comms.clone()).build().await {
+    let (changes_tx, changes_rx) = unbounded_channel();
+    let notifier = Arc::new(settings::Notifier { changes: changes_tx });
+    let _service_bundle = match Bundle::builder()
+        .set_comms(comms.clone())
+        .set_server_com_android_sdv_user_preferences_view_change_notifier(notifier)
+        .build()
+        .await
+    {
         Ok(service) => service,
         Err(e) => {
             error!("Failed to build service bundle: {e}");
@@ -155,10 +165,14 @@ async fn sdv_main(comms: Arc<dyn Communicate>) -> SdvResult<()> {
     let screen = Arc::new(Screen::new(commands_tx, deaths_tx));
     let last = Arc::new(Mutex::new(Last::default()));
     let services = Arc::new(Services::default());
+    let (settings_tx, settings_rx) = unbounded_channel();
 
     let mut futures_join_set = tokio::task::JoinSet::new();
     futures_join_set.spawn(handle_screen(screen.clone(), last.clone(), deaths_rx));
-    futures_join_set.spawn(handle_commands(commands_rx, screen.clone(), services.clone()));
+    futures_join_set.spawn(handle_commands(commands_rx, screen.clone(), services.clone(), settings_tx));
+    // The device's settings on their own: user_preferences and the groups' owners come in any
+    // order.
+    tokio::spawn(settings::settings_link(context, comms.clone(), screen.clone(), last.clone(), changes_rx, settings_rx));
     // The services the commands go to, each on its own: a bundle may come late or not at all.
     // Not in the join set: they end once their service is found.
     tokio::spawn(find_wifi(comms.clone(), services.clone()));
@@ -429,7 +443,7 @@ async fn handle_screen(screen: Arc<Screen>, last: Arc<Mutex<Last>>, mut deaths: 
 
 /// The last values to a panel that starts from nothing.
 fn resend(screen: &Screen, last: &Mutex<Last>) {
-    let (weather, news, thumbnails, networks, state, matter) = {
+    let (weather, news, thumbnails, networks, state, matter, settings) = {
         let last = last.lock().expect("last values");
         (
             last.weather.clone(),
@@ -438,6 +452,7 @@ fn resend(screen: &Screen, last: &Mutex<Last>) {
             last.wifi_networks.clone(),
             last.wifi_state.clone(),
             last.matter_devices.clone(),
+            last.settings.values().cloned().collect::<Vec<_>>(),
         )
     };
     if let Some(weather) = weather {
@@ -458,13 +473,21 @@ fn resend(screen: &Screen, last: &Mutex<Last>) {
     if let Some(matter) = matter {
         screen.publish_matter_devices(&matter);
     }
+    for group in &settings {
+        screen.publish_settings(group);
+    }
 }
 
 /// The screen's commands: the panel calls this bundle's sink (screen.rs) on a binder thread.
 /// Every command is a call of the owning bundle's service in a task of its own (a connect waits
 /// for its outcome; a scan meanwhile does not wait for it), and its answer goes back to the
 /// screen.
-async fn handle_commands(mut commands: UnboundedReceiver<ScreenCommand>, screen: Arc<Screen>, services: Arc<Services>) {
+async fn handle_commands(
+    mut commands: UnboundedReceiver<ScreenCommand>,
+    screen: Arc<Screen>,
+    services: Arc<Services>,
+    settings: tokio::sync::mpsc::UnboundedSender<Vec<u8>>,
+) {
     while let Some(command) = commands.recv().await {
         match command {
             ScreenCommand::Wifi(bytes) => {
@@ -480,6 +503,10 @@ async fn handle_commands(mut commands: UnboundedReceiver<ScreenCommand>, screen:
                     continue;
                 };
                 tokio::spawn(call_matter(screen.clone(), services.matter.get().cloned(), command));
+            }
+            // settings.rs checks and passes it
+            ScreenCommand::Settings(bytes) => {
+                let _ = settings.send(bytes);
             }
         }
     }
