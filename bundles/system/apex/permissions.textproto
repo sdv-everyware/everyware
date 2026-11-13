@@ -1,0 +1,14 @@
+# proto-file: //system/software_defined_vehicle/middleware/service_authz/proto/sdv/authz/policy/authz_policy.proto
+# proto-message: AuthzPolicy
+
+# What SystemServiceBundle may do on the SDV middleware: own settings in user_preferences
+# (register them, report their values) and take the requests to change them. The same
+# services as catalog/system.vsidl.
+server {
+  service: "com.android.sdv.user_preferences.user_controllable.UserControllableService"
+  channel: "com-android-sdv-user-preferences-user-controllable-user-controllable-service"
+}
+client {
+  service: "com.android.sdv.user_preferences.UserPreferencesRegistryService"
+  channel: "com-android-sdv-user-preferences-user-preferences-registry-service"
+}

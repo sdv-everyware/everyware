@@ -7,6 +7,7 @@ PRODUCT_PACKAGES += \
     com.everyware.dashboard \
     com.everyware.wifi \
     com.everyware.matter \
+    com.everyware.system \
     service_bundle_contexts
 
 # The browser of the panel (docs/project/browser.md): the service, its script, the launcher of

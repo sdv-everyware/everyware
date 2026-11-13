@@ -123,3 +123,21 @@ service_bundle {
         channel: "matter"
     }
 }
+
+# Owns the system settings of the device: the time zone and the clock's format. It keeps them
+# in SDV's user_preferences as a user-controllable service: registers them, applies a change
+# and reports the value in force. The services are user_preferences' own (its catalog, a
+# dependency of this one).
+service_bundle {
+    name: "SystemServiceBundle"
+
+    server {
+        service: "com.android.sdv.user_preferences.user_controllable.UserControllableService"
+        channel: "com-android-sdv-user-preferences-user-controllable-user-controllable-service"
+    }
+
+    client {
+        service: "com.android.sdv.user_preferences.UserPreferencesRegistryService"
+        channel: "com-android-sdv-user-preferences-user-preferences-registry-service"
+    }
+}
