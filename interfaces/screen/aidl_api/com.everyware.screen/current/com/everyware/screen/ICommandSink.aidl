@@ -21,4 +21,5 @@ package com.everyware.screen;
 interface ICommandSink {
   oneway void onWifiCommand(in byte[] command);
   oneway void onMatterCommand(in byte[] command);
+  oneway void onSettingsChange(in byte[] request);
 }

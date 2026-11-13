@@ -1,7 +1,8 @@
 //! SystemServiceBundle: owns the device's system settings in SDV's user_preferences and applies
 //! them. The group `time` holds the time zone (an IANA name, applied to the system through
-//! `persist.sys.timezone`, which bionic reads) and whether the clock shows 24 hours (applied by
-//! the screens that draw a clock).
+//! `persist.sys.timezone`, which bionic reads) and whether the clock shows 24 hours; the group
+//! `units` holds the unit of temperatures, Celsius or Fahrenheit. The clock's format and the
+//! unit are applied by the screens that show a clock or a temperature.
 //!
 //! The shape is SDV's user-controllable service: at start the bundle registers the group with
 //! its defaults (UserPreferencesRegistryService) and reports the values in force
@@ -12,8 +13,8 @@
 //!
 //! The settings are SHARED (the device's, not a user's). user_preferences pushes no SHARED value
 //! to its owner at start and keeps whatever the owner reports, so the bundle is their source of
-//! truth at boot: the time zone survives a reboot in its property, the clock's format in the
-//! bundle's own directory.
+//! truth at boot: the time zone survives a reboot in its property, the clock's format and the
+//! unit in the bundle's own directory.
 
 use async_trait::async_trait;
 use com_android_sdv_user_preferences_user_controllable_user_controllable_service_rpc::Interface as UserControllable;
@@ -22,6 +23,8 @@ use everyware_bundle_store::Store;
 use futures_util::stream::StreamExt;
 use log::{debug, error, info, warn};
 use protobuf::{EnumOrUnknown, MessageField};
+use user_preferences_api::setting::setting_with_constraints::Constraints;
+use user_preferences_api::setting::EnumConstraints;
 use sdv::mw::{clientlib, Availability, Communicate, SdvComms};
 use sdv::status::{SdvResult, SdvStatus, SdvStatusCode};
 use sdv_mw_rs_com_everyware_system_service_bundle::{ClientDescriptors, SystemServiceBundle as Bundle};
@@ -37,21 +40,28 @@ use user_preferences_api::user_controllable_service::{
 };
 use user_preferences_api::user_preferences_registry_service::{RegisterSettingsRequest, UpdateSettingsRequest};
 
-/// The group and its schema version: a new key or a new default is a new version.
-const GROUP: &str = "time";
-const VERSION: &str = "1";
+/// The groups and their schema versions: a new key or a new default is a new version.
+const TIME: &str = "time";
+const UNITS: &str = "units";
+const GROUPS: [(&str, &str); 2] = [(TIME, "1"), (UNITS, "1")];
 /// The time zone, an IANA name as UTF-8 bytes (a setting has no string type).
 const TIMEZONE: &str = "timezone";
 /// The clock shows 24 hours (true) or 12 hours with AM and PM (false).
 const HOUR_CYCLE_24: &str = "hour_cycle_24";
+/// The unit of temperatures: an enum of two values, Celsius and Fahrenheit.
+const TEMPERATURE: &str = "temperature";
+const CELSIUS: i32 = 0;
+const FAHRENHEIT: i32 = 1;
 const DEFAULT_TIMEZONE: &str = "Etc/UTC";
 const DEFAULT_HOUR_CYCLE_24: bool = true;
+const DEFAULT_TEMPERATURE: i32 = CELSIUS;
 /// The system property bionic's localtime reads (system/sepolicy: timezone_prop).
 const TIMEZONE_PROPERTY: &str = "persist.sys.timezone";
 /// Where bionic looks for the time zone data, in its order.
 const TZDATA: [&str; 2] = ["/apex/com.android.tzdata/etc/tz/tzdata", "/system/usr/share/zoneinfo/tzdata"];
 /// The clock's format, kept in the bundle's directory (the time zone has its property).
 const HOUR_CYCLE_FILE: &str = "hour_cycle_24.pb";
+const TEMPERATURE_FILE: &str = "temperature.pb";
 /// A kept setting is good for the life of the device.
 const KEPT: Duration = Duration::from_secs(100 * 365 * 24 * 3600);
 /// Between two attempts to register when user_preferences refused or was not there.
@@ -119,30 +129,32 @@ async fn sdv_main(comms: Arc<dyn Communicate>, store: Arc<Store>) -> SdvResult<(
     let _ = settings.registry.set(registry.clone());
     // Register, then report the values in force: user_preferences keeps what the owner of a
     // SHARED setting reports. Again later if user_preferences was not ready.
-    loop {
-        match register(&registry).await {
-            Ok(()) => break,
-            Err(e) => warn!("{e}; again in {} s", RETRY.as_secs()),
+    for (group, version) in GROUPS {
+        loop {
+            match register(&registry, group, version).await {
+                Ok(()) => break,
+                Err(e) => warn!("{e}; again in {} s", RETRY.as_secs()),
+            }
+            tokio::time::sleep(RETRY).await;
         }
-        tokio::time::sleep(RETRY).await;
+        info!("registered the settings group '{group}' version {version}");
     }
-    info!("registered the settings group '{GROUP}' version {VERSION}");
     settings.report().await;
     futures::future::pending::<()>().await;
     Ok(())
 }
 
-async fn register(registry: &RegistryClient) -> Result<(), String> {
+async fn register(registry: &RegistryClient, group: &str, version: &str) -> Result<(), String> {
     registry
         .RegisterSettings(&RegisterSettingsRequest {
-            group_name: GROUP.to_string(),
-            version: VERSION.to_string(),
-            settings_definitions: definitions(),
+            group_name: group.to_string(),
+            version: version.to_string(),
+            settings_definitions: definitions(group),
             ..Default::default()
         })
         .await
         .map(|_| ())
-        .map_err(|e| format!("Failed to register the settings: {e}"))
+        .map_err(|e| format!("Failed to register the settings group '{group}': {e}"))
 }
 
 /// The client of user_preferences' registry, once its server is registered.
@@ -161,19 +173,41 @@ async fn registry_client(comms: &dyn Communicate) -> SdvResult<RegistryClient> {
     clientlib::create_rpc_client(comms, descriptor, sdv::mw::ClientOptions::default()).await
 }
 
-fn definitions() -> Vec<SettingDefinition> {
-    let shared = |key: &str, value: Value| SettingDefinition {
+/// The group a key belongs to.
+fn group_of(key: &str) -> Option<&'static str> {
+    match key {
+        TIMEZONE | HOUR_CYCLE_24 => Some(TIME),
+        TEMPERATURE => Some(UNITS),
+        _ => None,
+    }
+}
+
+/// A group's settings with their defaults; the unit is constrained to its two values.
+fn definitions(group: &str) -> Vec<SettingDefinition> {
+    let shared = |key: &str, value: Value, constraints: Option<Constraints>| SettingDefinition {
         kind: EnumOrUnknown::new(SettingKind::SHARED),
         setting_with_constraints: MessageField::some(SettingWithConstraints {
             setting: MessageField::some(Setting { key: key.to_string(), value: Some(value), ..Default::default() }),
+            constraints,
             ..Default::default()
         }),
         ..Default::default()
     };
-    vec![
-        shared(TIMEZONE, Value::Blob(DEFAULT_TIMEZONE.as_bytes().to_vec())),
-        shared(HOUR_CYCLE_24, Value::Bool(DEFAULT_HOUR_CYCLE_24)),
-    ]
+    match group {
+        TIME => vec![
+            shared(TIMEZONE, Value::Blob(DEFAULT_TIMEZONE.as_bytes().to_vec()), None),
+            shared(HOUR_CYCLE_24, Value::Bool(DEFAULT_HOUR_CYCLE_24), None),
+        ],
+        UNITS => vec![shared(
+            TEMPERATURE,
+            Value::Enum(DEFAULT_TEMPERATURE),
+            Some(Constraints::EnumConstraints(EnumConstraints {
+                possible_values: vec![CELSIUS, FAHRENHEIT],
+                ..Default::default()
+            })),
+        )],
+        _ => Vec::new(),
+    }
 }
 
 /// The values in force.
@@ -181,11 +215,12 @@ fn definitions() -> Vec<SettingDefinition> {
 struct State {
     timezone: String,
     hour_cycle_24: bool,
+    temperature: i32,
 }
 
 impl State {
-    /// What is in force at start: the system's time zone (empty property: bionic uses UTC) and
-    /// the clock's format the bundle kept.
+    /// What is in force at start: the system's time zone (empty property: bionic uses UTC), the
+    /// clock's format and the unit the bundle kept.
     fn kept(store: &Store) -> Self {
         let timezone = property::get(TIMEZONE_PROPERTY)
             .filter(|tz| !tz.is_empty())
@@ -194,14 +229,24 @@ impl State {
             Some(Value::Bool(on)) => on,
             _ => DEFAULT_HOUR_CYCLE_24,
         };
-        Self { timezone, hour_cycle_24 }
+        let temperature = match store.load::<Setting>(TEMPERATURE_FILE, KEPT).and_then(|s| s.value) {
+            Some(Value::Enum(unit)) if unit == CELSIUS || unit == FAHRENHEIT => unit,
+            _ => DEFAULT_TEMPERATURE,
+        };
+        Self { timezone, hour_cycle_24, temperature }
     }
 
-    fn settings(&self) -> Vec<Setting> {
-        vec![
-            Setting { key: TIMEZONE.to_string(), value: Some(Value::Blob(self.timezone.as_bytes().to_vec())), ..Default::default() },
-            Setting { key: HOUR_CYCLE_24.to_string(), value: Some(Value::Bool(self.hour_cycle_24)), ..Default::default() },
-        ]
+    /// A group's values in force.
+    fn settings(&self, group: &str) -> Vec<Setting> {
+        let setting = |key: &str, value: Value| Setting { key: key.to_string(), value: Some(value), ..Default::default() };
+        match group {
+            TIME => vec![
+                setting(TIMEZONE, Value::Blob(self.timezone.as_bytes().to_vec())),
+                setting(HOUR_CYCLE_24, Value::Bool(self.hour_cycle_24)),
+            ],
+            UNITS => vec![setting(TEMPERATURE, Value::Enum(self.temperature))],
+            _ => Vec::new(),
+        }
     }
 }
 
@@ -249,23 +294,38 @@ impl TimeSettings {
                     Err(e) => error!("24-hour clock {on} not kept: {e}"),
                 }
             }
-            (TIMEZONE | HOUR_CYCLE_24, value) => warn!("{}: a value of the wrong type: {value:?}", setting.key),
-            (key, value) => warn!("not a setting of '{GROUP}': {key} = {value:?}"),
+            (TEMPERATURE, Some(Value::Enum(unit))) if *unit == CELSIUS || *unit == FAHRENHEIT => {
+                if *unit == state.temperature {
+                    return;
+                }
+                match self.store.save(TEMPERATURE_FILE, setting) {
+                    Ok(()) => {
+                        info!("temperature unit: {}", if *unit == FAHRENHEIT { "Fahrenheit" } else { "Celsius" });
+                        state.temperature = *unit;
+                    }
+                    Err(e) => error!("temperature unit {unit} not kept: {e}"),
+                }
+            }
+            (TIMEZONE | HOUR_CYCLE_24 | TEMPERATURE, value) => warn!("{}: not a value it takes: {value:?}", setting.key),
+            (key, value) => warn!("not a setting of this bundle: {key} = {value:?}"),
         }
     }
 
-    /// The values in force to user_preferences (UpdateSettings), which sends them to the screens.
+    /// The values in force of every group to user_preferences (UpdateSettings), which sends
+    /// them to the screens.
     async fn report(&self) {
         let Some(registry) = self.registry.get() else {
             warn!("the values in force not reported: no registry yet");
             return;
         };
-        let settings = self.state.lock().await.settings();
-        if let Err(e) = registry
-            .UpdateSettings(&UpdateSettingsRequest { group_name: GROUP.to_string(), settings, ..Default::default() })
-            .await
-        {
-            warn!("Failed to report the settings in force: {e}");
+        for (group, _) in GROUPS {
+            let settings = self.state.lock().await.settings(group);
+            if let Err(e) = registry
+                .UpdateSettings(&UpdateSettingsRequest { group_name: group.to_string(), settings, ..Default::default() })
+                .await
+            {
+                warn!("Failed to report the settings in force of '{group}': {e}");
+            }
         }
     }
 }
@@ -277,20 +337,26 @@ impl UserControllable for TimeSettings {
         _caller_id: sdv::comms::id::ServiceFqin,
         request: &RequestSettingsChangeRequest,
     ) -> SdvResult<RequestSettingsChangeResponse> {
-        if request.group_name != GROUP {
-            return Err(SdvStatus::with_message(SdvStatusCode::NotFound, format!("no settings group {}", request.group_name)));
+        let group = request.group_name.as_str();
+        if !GROUPS.iter().any(|(g, _)| *g == group) {
+            return Err(SdvStatus::with_message(SdvStatusCode::NotFound, format!("no settings group {group}")));
         }
         let mut state = self.state.lock().await;
         for setting in &request.settings {
-            self.apply(&mut state, setting);
+            if group_of(&setting.key) == Some(group) {
+                self.apply(&mut state, setting);
+            } else {
+                warn!("not a setting of '{group}': {}", setting.key);
+            }
         }
         // The values in force, which may differ from the request.
         let keys: HashSet<&str> = request.settings.iter().map(|s| s.key.as_str()).collect();
-        let settings = state.settings().into_iter().filter(|s| keys.contains(s.key.as_str())).collect();
+        let settings = state.settings(group).into_iter().filter(|s| keys.contains(s.key.as_str())).collect();
         Ok(RequestSettingsChangeResponse { settings, ..Default::default() })
     }
 
-    /// Back to the defaults, then the values in force to user_preferences (the proto's contract).
+    /// Every group back to its defaults, then the values in force to user_preferences (the
+    /// proto's contract; the request names no group).
     async fn FactoryReset(
         &self,
         _caller_id: sdv::comms::id::ServiceFqin,
@@ -298,9 +364,11 @@ impl UserControllable for TimeSettings {
     ) -> SdvResult<FactoryResetResponse> {
         {
             let mut state = self.state.lock().await;
-            for definition in definitions() {
-                if let Some(setting) = definition.setting_with_constraints.setting.as_ref() {
-                    self.apply(&mut state, setting);
+            for (group, _) in GROUPS {
+                for definition in definitions(group) {
+                    if let Some(setting) = definition.setting_with_constraints.setting.as_ref() {
+                        self.apply(&mut state, setting);
+                    }
                 }
             }
             info!("factory reset: {state:?}");

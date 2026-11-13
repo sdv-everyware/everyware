@@ -53,4 +53,13 @@ interface IScreenLink {
      * subscribe.
      */
     void subscribeCommands(in ICommandSink sink);
+
+    /**
+     * A settings group of the device (after subscribeCommands: a new method goes last, so a
+     * panel built before it keeps the numbers of the others), as user_preferences reports it: a
+     * com.android.sdv.user_preferences.OnSettingsChangeRequest (Google's
+     * user_preferences/vsidl/v1/change_notifier.proto): the group's id and its active values.
+     * Sent for each group the bundle follows, at subscribe and on every change.
+     */
+    void publishSettings(in byte[] settings);
 }

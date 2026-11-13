@@ -1,7 +1,7 @@
 # The System bundle
 
 `SystemServiceBundle` (APEX `com.everyware.system`) owns the system settings of the device:
-the time zone and whether the clock shows 24 hours. The values live in SDV's
+the time zone, whether the clock shows 24 hours and the unit of temperatures. The values live in SDV's
 `user_preferences` service. The bundle registers them there as a user-controllable group,
 applies a change and reports the value in force.
 
@@ -25,6 +25,7 @@ applies a change and reports the value in force.
 |---|---|---|---|
 | `time/timezone` | text (UTF-8) | `Etc/UTC` | the system property `persist.sys.timezone` |
 | `time/hour_cycle_24` | bool | true | the screen reads it, the bundle keeps it |
+| `units/temperature` | enum: 0 Celsius, 1 Fahrenheit | 0 | the screen reads it, the bundle keeps it |
 
 - A zone name is checked against the device's tzdata. An unknown name is refused, and the
   value in force is reported back.

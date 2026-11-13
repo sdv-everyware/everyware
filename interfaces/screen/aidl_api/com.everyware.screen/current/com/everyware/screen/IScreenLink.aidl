@@ -28,4 +28,5 @@ interface IScreenLink {
   void publishMatterDevices(in byte[] devices);
   void publishMatterResult(@utf8InCpp String command, long nodeId, int endpoint, in byte[] result);
   void subscribeCommands(in com.everyware.screen.ICommandSink sink);
+  void publishSettings(in byte[] settings);
 }
