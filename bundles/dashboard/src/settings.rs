@@ -25,9 +25,10 @@ use crate::ContextRef;
 use sdv::mw::{clientlib, Availability, Communicate};
 use sdv::status::{SdvResult, SdvStatus, SdvStatusCode};
 use sdv_mw_rs_com_everyware_dashboard_service_bundle::ClientDescriptors;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
-use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
+use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
 use user_preferences_api::change_notifier::{OnSettingsChangeRequest, OnSettingsChangeResponse};
 use user_preferences_api::settings_group::SettingsGroupId;
 use user_preferences_api::user_preferences_management_service::request_settings_change_request::ChangePersistencePolicy;
@@ -74,6 +75,8 @@ impl ChangeNotifier for Notifier {
 
 /// The settings link: finds the groups' owners and user_preferences, subscribes to each group,
 /// then passes the reported values to the screen and the screen's changes to user_preferences.
+/// user_preferences keeps its subscribers in memory only: every time its server registers again
+/// (it restarted), the bridge subscribes to every group again.
 pub async fn settings_link(
     context: ContextRef,
     comms: Arc<dyn Communicate>,
@@ -82,62 +85,112 @@ pub async fn settings_link(
     mut changes: UnboundedReceiver<OnSettingsChangeRequest>,
     mut requests: UnboundedReceiver<Vec<u8>>,
 ) {
-    let management = match management_client(comms.as_ref()).await {
-        Ok(client) => client,
+    let descriptor =
+        ClientDescriptors::<ManagementClient>::COM_ANDROID_SDV_USER_PREFERENCES_USER_PREFERENCES_MANAGEMENT_SERVICE;
+    let mut registrations = match clientlib::create_server_registration_event_stream(comms.as_ref(), descriptor).await {
+        Ok(events) => events,
         Err(e) => {
             error!("no settings for the screen: {e:?}");
             return;
         }
     };
-    let mut followed = Vec::new();
-    let mut owners: Vec<((&str, &str), ServiceFqin)> = Vec::new();
-    for (package, bundle, name) in GROUPS {
-        let owner = match owners.iter().find(|(key, _)| *key == (package, bundle)) {
-            Some((_, fqin)) => fqin.clone(),
-            None => {
-                let Some(fqin) = find_owner(context, package, bundle).await else {
-                    error!("no owner {package}.{bundle} of the settings group '{name}'");
-                    continue;
-                };
-                owners.push(((package, bundle), fqin.clone()));
-                fqin
-            }
-        };
-        let group = SettingsGroupId { service_fqin: owner.to_string(), name: name.to_string(), ..Default::default() };
-        let settings = subscribe(&management, &group).await;
-        show(&screen, &last, settings);
-        followed.push(group);
-    }
+    let (owners_tx, mut owners) = unbounded_channel();
+    tokio::spawn(find_groups(context, owners_tx));
+    let (subscribed_tx, mut subscribed) = unbounded_channel();
+    // The groups whose owner is known, the ones subscribed at the current user_preferences, and
+    // its client; a subscribe of an earlier one ends when the generation moves on.
+    let mut groups: Vec<SettingsGroupId> = Vec::new();
+    let mut followed: Vec<SettingsGroupId> = Vec::new();
+    let mut management: Option<Arc<ManagementClient>> = None;
+    let generation = Arc::new(AtomicU64::new(0));
     loop {
         tokio::select! {
-            Some(change) = changes.recv() => {
-                if followed.iter().any(|g| Some(g) == change.settings_group_id.as_ref()) {
-                    show(&screen, &last, change);
+            Some(event) = registrations.next() => {
+                followed.clear();
+                management = None;
+                let now = generation.fetch_add(1, Ordering::SeqCst) + 1;
+                if event != Availability::Available {
+                    warn!("user_preferences is gone; the settings wait for it");
+                    continue;
+                }
+                match clientlib::create_rpc_client(comms.as_ref(), descriptor, sdv::mw::ClientOptions::default()).await {
+                    Ok(client) => {
+                        let client = Arc::new(client);
+                        info!("user_preferences is there: subscribing to {} settings groups", groups.len());
+                        for group in &groups {
+                            tokio::spawn(subscribe(client.clone(), group.clone(), subscribed_tx.clone(), generation.clone(), now));
+                        }
+                        management = Some(client);
+                    }
+                    Err(e) => error!("Failed to create the client of UserPreferencesManagementService: {e:?}"),
                 }
             }
-            Some(bytes) = requests.recv() => request(&management, &followed, &screen, &last, &bytes).await,
+            Some(group) = owners.recv() => {
+                if let Some(client) = &management {
+                    let now = generation.load(Ordering::SeqCst);
+                    tokio::spawn(subscribe(client.clone(), group.clone(), subscribed_tx.clone(), generation.clone(), now));
+                }
+                groups.push(group);
+            }
+            Some(settings) = subscribed.recv() => {
+                let settings: OnSettingsChangeRequest = settings;
+                if let Some(group) = settings.settings_group_id.as_ref().cloned() {
+                    if !followed.contains(&group) {
+                        followed.push(group);
+                    }
+                    show(&screen, &last, settings, true);
+                }
+            }
+            Some(change) = changes.recv() => {
+                if followed.iter().any(|g| Some(g) == change.settings_group_id.as_ref()) {
+                    show(&screen, &last, change, false);
+                }
+            }
+            Some(bytes) = requests.recv() => match &management {
+                Some(client) => request(client, &followed, &screen, &last, &bytes).await,
+                None => warn!("a settings change while user_preferences is not there, dropped"),
+            },
             else => break,
         }
     }
 }
 
-/// A group's values to the screen, kept for a panel that comes back.
-fn show(screen: &Screen, last: &Mutex<Last>, settings: OnSettingsChangeRequest) {
-    let Some(group) = settings.settings_group_id.as_ref() else { return };
-    info!("settings '{}': {} values", group.name, settings.active_settings.len());
-    last.lock().expect("last values").settings.insert(group.name.clone(), settings.clone());
-    screen.publish_settings(&settings);
+/// A group's values to the screen, the whole group kept for a panel that comes back. A
+/// notification carries only the keys that changed (user_preferences' propagator): it is merged
+/// into the kept group. A subscribe's answer is the whole group and replaces it.
+fn show(screen: &Screen, last: &Mutex<Last>, settings: OnSettingsChangeRequest, whole: bool) {
+    let Some(name) = settings.settings_group_id.as_ref().map(|g| g.name.clone()) else { return };
+    let merged = {
+        let mut last = last.lock().expect("last values");
+        let kept = last.settings.entry(name.clone()).or_default();
+        if whole {
+            *kept = settings;
+        } else {
+            kept.settings_group_id = settings.settings_group_id;
+            for setting in settings.active_settings {
+                match kept.active_settings.iter_mut().find(|k| k.key == setting.key) {
+                    Some(k) => *k = setting,
+                    None => kept.active_settings.push(setting),
+                }
+            }
+            kept.pending_changes = settings.pending_changes;
+            kept.persisted_settings = settings.persisted_settings;
+        }
+        kept.clone()
+    };
+    info!("settings '{name}': {} values, {} pending", merged.active_settings.len(), merged.pending_changes.len());
+    screen.publish_settings(&merged);
 }
 
 /// One change the screen asks for. Only for a followed group, and never persisted per user. A
-/// change that fails sends the group's last values again, so the screen drops what it showed.
+/// change that fails sends the group's kept values again, so the screen drops what it showed.
 async fn request(management: &ManagementClient, followed: &[SettingsGroupId], screen: &Screen, last: &Mutex<Last>, bytes: &[u8]) {
     let Ok(mut request) = RequestSettingsChangeRequest::parse_from_bytes(bytes) else {
         warn!("a settings change that does not parse");
         return;
     };
     let Some(group) = request.settings_group_id.as_ref().filter(|g| followed.contains(g)).cloned() else {
-        warn!("a settings change of a group this bundle does not follow, dropped");
+        warn!("a settings change of a group this bundle does not follow (yet), dropped");
         return;
     };
     request.change_persistence_policy = ChangePersistencePolicy::NON_PERSISTENT_CHANGE.into();
@@ -154,10 +207,17 @@ async fn request(management: &ManagementClient, followed: &[SettingsGroupId], sc
     }
 }
 
-/// Subscribes to a group and returns its values as a notification would carry them. Tries
-/// again until it gets them: the owner may not have registered the group yet.
-async fn subscribe(management: &ManagementClient, group: &SettingsGroupId) -> OnSettingsChangeRequest {
-    loop {
+/// Subscribes to a group and sends its values, as a notification would carry them, to the link.
+/// Tries again until it gets them (the owner may not have registered the group yet), as long as
+/// user_preferences is the one it started with.
+async fn subscribe(
+    management: Arc<ManagementClient>,
+    group: SettingsGroupId,
+    subscribed: UnboundedSender<OnSettingsChangeRequest>,
+    generation: Arc<AtomicU64>,
+    started: u64,
+) {
+    while generation.load(Ordering::SeqCst) == started {
         let request = SubscribeToSettingsChangeAndGetSettingsRequest {
             settings_group_id: MessageField::some(group.clone()),
             ..Default::default()
@@ -165,17 +225,33 @@ async fn subscribe(management: &ManagementClient, group: &SettingsGroupId) -> On
         match management.SubscribeToSettingsChangeAndGetSettings(&request).await {
             Ok(response) => {
                 info!("following the settings group '{}' version {}", group.name, response.version);
-                return OnSettingsChangeRequest {
+                let _ = subscribed.send(OnSettingsChangeRequest {
                     settings_group_id: MessageField::some(group.clone()),
                     active_settings: response.active_settings.iter().filter_map(|s| s.setting.as_ref().cloned()).collect(),
                     pending_changes: response.pending_settings.clone(),
                     persisted_settings: response.persisted_settings.clone(),
                     ..Default::default()
-                };
+                });
+                return;
             }
             Err(e) => debug!("settings group '{}' not there yet ({e:?}); again in {} s", group.name, RETRY.as_secs()),
         }
         tokio::time::sleep(RETRY).await;
+    }
+}
+
+/// The groups' ids, each sent once its owner is found (one search per owning bundle).
+async fn find_groups(context: ContextRef, groups: UnboundedSender<SettingsGroupId>) {
+    let mut owners: Vec<(&str, &str)> = GROUPS.iter().map(|(package, bundle, _)| (*package, *bundle)).collect();
+    owners.dedup();
+    for (package, bundle) in owners {
+        let Some(owner) = find_owner(context, package, bundle).await else {
+            error!("no owner {package}.{bundle} of a settings group");
+            continue;
+        };
+        for (_, _, name) in GROUPS.iter().filter(|(p, b, _)| (*p, *b) == (package, bundle)) {
+            let _ = groups.send(SettingsGroupId { service_fqin: owner.to_string(), name: name.to_string(), ..Default::default() });
+        }
     }
 }
 
@@ -206,25 +282,4 @@ async fn find_owner(context: ContextRef, package: &str, bundle: &str) -> Option<
         }
     }
     None
-}
-
-/// The client of user_preferences' UserPreferencesManagementService, once its server is
-/// registered.
-async fn management_client(comms: &dyn Communicate) -> SdvResult<ManagementClient> {
-    let descriptor =
-        ClientDescriptors::<ManagementClient>::COM_ANDROID_SDV_USER_PREFERENCES_USER_PREFERENCES_MANAGEMENT_SERVICE;
-    let mut events = clientlib::create_server_registration_event_stream(comms, descriptor).await?;
-    loop {
-        match events.next().await {
-            Some(Availability::Available) => break,
-            Some(_) => debug!("waiting for UserPreferencesManagementService"),
-            None => {
-                return Err(SdvStatus::with_message(
-                    SdvStatusCode::Unavailable,
-                    "the registration events of UserPreferencesManagementService ended".to_string(),
-                ))
-            }
-        }
-    }
-    clientlib::create_rpc_client(comms, descriptor, sdv::mw::ClientOptions::default()).await
 }

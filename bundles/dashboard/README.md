@@ -86,6 +86,10 @@ The bridge shows the device's settings on the screen as Google's HMI sample does
 - The screen gets Google's messages as they are; a new setting needs no new method.
 - A change is NON_PERSISTENT: the groups are SHARED, so the System bundle keeps the value.
   A PERSISTENT change would be stored per user, and the device has no users.
+- A notification carries only the keys that changed; the bridge merges it into the group it
+  keeps, so a panel that comes back gets the whole group.
+- user_preferences keeps its subscribers in memory only: when its server registers again (it
+  restarted), the bridge subscribes to every group again.
 - It takes a change only for a group it follows, and a notification only from user_preferences.
   A change that fails sends the group's last values again, so the screen drops what it showed.
 

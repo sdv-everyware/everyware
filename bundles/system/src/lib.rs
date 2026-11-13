@@ -118,7 +118,7 @@ async fn sdv_main(comms: Arc<dyn Communicate>, store: Arc<Store>) -> SdvResult<(
     let zones = time_zones();
     let state = State::kept(&store);
     info!("in force: {state:?}");
-    let settings = Arc::new(TimeSettings { zones, store, registry: OnceLock::new(), state: Mutex::new(state) });
+    let settings = Arc::new(SystemSettings { zones, store, registry: OnceLock::new(), state: Mutex::new(state) });
     let _bundle = Bundle::builder()
         .set_comms(comms.clone())
         .set_server_com_android_sdv_user_preferences_user_controllable_user_controllable_service(settings.clone())
@@ -250,7 +250,7 @@ impl State {
     }
 }
 
-struct TimeSettings {
+struct SystemSettings {
     /// The names in the time zone data; empty when it cannot be read, then only UTC is taken.
     zones: HashSet<String>,
     store: Arc<Store>,
@@ -259,7 +259,7 @@ struct TimeSettings {
     state: Mutex<State>,
 }
 
-impl TimeSettings {
+impl SystemSettings {
     fn known_zone(&self, name: &str) -> bool {
         if self.zones.is_empty() { name == DEFAULT_TIMEZONE } else { self.zones.contains(name) }
     }
@@ -331,7 +331,7 @@ impl TimeSettings {
 }
 
 #[async_trait]
-impl UserControllable for TimeSettings {
+impl UserControllable for SystemSettings {
     async fn RequestSettingsChange(
         &self,
         _caller_id: sdv::comms::id::ServiceFqin,
