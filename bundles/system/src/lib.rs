@@ -46,6 +46,13 @@ use user_preferences_api::user_preferences_registry_service::{RegisterSettingsRe
 /// HOUR_CYCLE_24, TEMPERATURE). A changed name must change there too.
 ///
 /// The groups and their schema versions: a new key or a new default is a new version.
+///
+/// A group is a folder of settings in user_preferences: it is registered, subscribed to and
+/// changed as a whole, and it has its own version. GROUPS says simply "this bundle has two
+/// folders: `time` at version 1 and `units` at version 1":
+///   time  (v1): timezone, hour_cycle_24
+///   units (v1): temperature
+/// A new key in `time` makes it ("time", "2"); `units` stays at "1".
 const TIME: &str = "time";
 const UNITS: &str = "units";
 const GROUPS: [(&str, &str); 2] = [(TIME, "1"), (UNITS, "1")];
