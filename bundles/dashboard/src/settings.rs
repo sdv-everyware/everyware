@@ -132,8 +132,12 @@ pub async fn settings_link(
                 }
                 groups.push(group);
             }
-            Some(settings) = subscribed.recv() => {
+            Some((started, settings)) = subscribed.recv() => {
                 let settings: OnSettingsChangeRequest = settings;
+                // an answer of a user_preferences that is gone since: its subscription is too
+                if started != generation.load(Ordering::SeqCst) {
+                    continue;
+                }
                 if let Some(group) = settings.settings_group_id.as_ref().cloned() {
                     if !followed.contains(&group) {
                         followed.push(group);
@@ -213,7 +217,7 @@ async fn request(management: &ManagementClient, followed: &[SettingsGroupId], sc
 async fn subscribe(
     management: Arc<ManagementClient>,
     group: SettingsGroupId,
-    subscribed: UnboundedSender<OnSettingsChangeRequest>,
+    subscribed: UnboundedSender<(u64, OnSettingsChangeRequest)>,
     generation: Arc<AtomicU64>,
     started: u64,
 ) {
@@ -225,13 +229,13 @@ async fn subscribe(
         match management.SubscribeToSettingsChangeAndGetSettings(&request).await {
             Ok(response) => {
                 info!("following the settings group '{}' version {}", group.name, response.version);
-                let _ = subscribed.send(OnSettingsChangeRequest {
+                let _ = subscribed.send((started, OnSettingsChangeRequest {
                     settings_group_id: MessageField::some(group.clone()),
                     active_settings: response.active_settings.iter().filter_map(|s| s.setting.as_ref().cloned()).collect(),
                     pending_changes: response.pending_settings.clone(),
                     persisted_settings: response.persisted_settings.clone(),
                     ..Default::default()
-                });
+                }));
                 return;
             }
             Err(e) => debug!("settings group '{}' not there yet ({e:?}); again in {} s", group.name, RETRY.as_secs()),

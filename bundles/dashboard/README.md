@@ -89,7 +89,8 @@ The bridge shows the device's settings on the screen as Google's HMI sample does
 - A notification carries only the keys that changed; the bridge merges it into the group it
   keeps, so a panel that comes back gets the whole group.
 - user_preferences keeps its subscribers in memory only: when its server registers again (it
-  restarted), the bridge subscribes to every group again.
+  restarted), the bridge subscribes to every group again. Google's sample is not restartable
+  (its orchestration config), so today it comes back only with a reboot.
 - It takes a change only for a group it follows, and a notification only from user_preferences.
   A change that fails sends the group's last values again, so the screen drops what it showed.
 
