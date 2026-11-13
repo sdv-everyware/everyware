@@ -7,6 +7,11 @@
 //! RequestSettingsChangeRequest) goes to user_preferences, which asks the owner to apply it. The
 //! screen sees a new value only once the owner applied it and reported it.
 //!
+//! The messages are Google's, there is no proto of ours for settings:
+//! system/software_defined_vehicle/automotive_services/user_preferences/vsidl/v1/
+//! (change_notifier.proto, user_preferences_management_service.proto, setting.proto,
+//! settings_group.proto). The groups and keys are the owner's: bundles/system/src/lib.rs.
+//!
 //! The changes are NON_PERSISTENT: the groups are SHARED, so the owner keeps the value and
 //! reports it, and user_preferences keeps what the owner reports. A PERSISTENT change would be
 //! stored per user, and this device has no users.

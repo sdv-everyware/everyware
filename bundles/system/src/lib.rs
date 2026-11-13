@@ -40,6 +40,11 @@ use user_preferences_api::user_controllable_service::{
 };
 use user_preferences_api::user_preferences_registry_service::{RegisterSettingsRequest, UpdateSettingsRequest};
 
+/// The groups and keys of this bundle. They are only strings in Google's Setting
+/// (system/software_defined_vehicle/automotive_services/user_preferences/vsidl/v1/setting.proto), no proto
+/// of ours; the screen reads the same names: smarthome-app src/state.rs (TIMEZONE,
+/// HOUR_CYCLE_24, TEMPERATURE). A changed name must change there too.
+///
 /// The groups and their schema versions: a new key or a new default is a new version.
 const TIME: &str = "time";
 const UNITS: &str = "units";

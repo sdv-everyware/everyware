@@ -15,7 +15,8 @@ interface ICommandSink {
     oneway void onMatterCommand(in byte[] command);
     /**
      * A change of the device's settings: a com.android.sdv.user_preferences.RequestSettingsChangeRequest
-     * (Google's user_preferences/vsidl/v1/user_preferences_management_service.proto) for a group
+     * (Google's, no proto of ours:
+     * system/software_defined_vehicle/automotive_services/user_preferences/vsidl/v1/user_preferences_management_service.proto) for a group
      * the screen got with IScreenLink.publishSettings. The bundle passes it to user_preferences;
      * the new values come back with publishSettings once the group's owner applied them.
      */
