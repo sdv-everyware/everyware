@@ -65,7 +65,15 @@ service_bundle {
 
 Then:
 - `catalog/generated/Android.bp`: the bundle's crate and the RPC crate (copy the Matter blocks).
-- `apex/permissions.textproto`: the same `server` as in the vsidl. The SDV agents check it.
+- `apex/permissions.textproto`: the same `server` as in the vsidl, but the service with its
+  package. The SDV agents check it.
+
+  ```
+  server {
+    service: "com.everyware.LedService"
+    channel: "led"
+  }
+  ```
 - `product/everyware.mk`: `com.everyware.<name>` in `PRODUCT_PACKAGES`.
 - If the bundle touches the system (a sysfs file, a system property), it needs its own SELinux
   domain (`device-rb3` sepolicy) and a line in `product/service_bundle_contexts`:
@@ -100,7 +108,8 @@ The dashboard bundle is the client.
     }
 ```
 
-- `bundles/dashboard/apex/permissions.textproto`: the same `client`.
+- `bundles/dashboard/apex/permissions.textproto`: the same `client`, with the package:
+  `service: "com.everyware.LedService"`, `channel: "led"`.
 - `catalog/generated/Android.bp` and `bundles/dashboard/Android.bp`: the RPC crate in `rustlibs`.
 - `bundles/dashboard/src/lib.rs`: a client that waits for the server, and a call per command.
   Copy `create_matter_client` and `call_matter`.
@@ -149,18 +158,16 @@ The screen is a Figma design driven by code.
 
 ## Build and run on the board
 
+A new bundle or a new SELinux domain needs the image first: `m`, then `tools/flash.sh images`
+in `device-rb3`. After that, a changed bundle goes to the board without a flash:
+
 ```bash
 source device/rb3/sdv_media_db845c/tools/env.sh
-m com.everyware.led com.everyware.dashboard          # the two bundles
-adb root && adb remount                              # after every reboot
-adb push $OUT/product/apex/com.everyware.led.apex $OUT/product/apex/com.everyware.dashboard.apex /product/apex/
-adb reboot
+# build the two bundles, push them to the board (root, remount, a backup), reboot
+vendor/sdv-everyware/everyware/scripts/deploy-bundle-rb3.sh all led dashboard
 vendor/sdv-everyware/everyware/scripts/run-smarthome-rb3.sh all   # the app with its design
 adb logcat -s led_bundle dashboard_bundle smarthome-app
 ```
-
-A new bundle or a new SELinux domain needs the image: `m`, then `tools/flash.sh images` in
-`device-rb3`.
 
 ## A setting is shorter
 
