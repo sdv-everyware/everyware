@@ -216,7 +216,19 @@ function authoring(msg, tag) {
       ...overrides.map(o => ({ ...o, guidPath: { guids: [content.guid, ...o.guidPath.guids] } })),
     ]);
   };
-  return { nodes, kids, log, base, frame, rect, ellipse, text, stroke, shadow, solid, chevron, plus, componentSet, instance, nameOverride, meter, FILL, copyNode, arc, at, under, sheetInstance, hugBox, newGuid: guid, count: () => local };
+  // A scrollbar beside a list: the library's #scrollbar is drawn as high as the screen (its
+  // track grows from the bottom, its thumb moves along it: meters the code sets for the list's
+  // height, ui-lib slot.rs scrollbar()). Its slot is a frame as high as the list that clips, the
+  // preview's bottom at the slot's bottom; the code puts the clone there too.
+  const scrollbarSlot = (parent, name, x, y, h) => {
+    const set = nodes.find(n => n.isStateGroup && n.name === '#scrollbar');
+    const v = set && kids(key(set.guid))[0];
+    if (!v) throw new Error('#scrollbar missing: run components-patch.js first');
+    const f = frame(parent, name, x, y, v.size.x, h, { frameMaskDisabled: false });
+    instance(f, name + '/preview', 0, h - v.size.y, v);
+    return f;
+  };
+  return { nodes, kids, log, base, frame, rect, ellipse, text, stroke, shadow, solid, chevron, plus, componentSet, instance, nameOverride, meter, FILL, copyNode, arc, at, under, sheetInstance, scrollbarSlot, hugBox, newGuid: guid, count: () => local };
 }
 
 module.exports = { key, C, FONT, authoring };
