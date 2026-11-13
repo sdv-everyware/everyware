@@ -3,7 +3,7 @@
 
 # What SystemServiceBundle may do on the SDV middleware: own settings in user_preferences
 # (register them, report their values) and take the requests to change them. The same
-# services as catalog/system.vsidl.
+# services as SystemServiceBundle in catalog/everyware.vsidl.
 server {
   service: "com.android.sdv.user_preferences.user_controllable.UserControllableService"
   channel: "com-android-sdv-user-preferences-user-controllable-user-controllable-service"

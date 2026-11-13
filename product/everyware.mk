@@ -1,6 +1,8 @@
 # Smarthome additions to an SDV Media product. A board product inherits this file.
 
-# Service bundles.
+# Service bundles. The product also needs, from its board layer: the SELinux domains of the
+# bundles in service_bundle_contexts (device/rb3/sdv_media_db845c/sepolicy), and SDV's
+# user_preferences service for com.everyware.system (com.android.sdv.sample.user_preferences).
 PRODUCT_PACKAGES += \
     com.everyware.weather \
     com.everyware.news \

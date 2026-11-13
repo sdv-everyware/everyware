@@ -31,11 +31,12 @@ applies a change and reports the value in force.
 - At start the bundle reports the values in force, because `user_preferences` does not push
   shared values at start.
 - `FactoryReset` applies the defaults and reports them.
-- If `user_preferences` is not there yet, the bundle retries the registration every 5 seconds.
+- The bundle waits until `user_preferences` is there, then retries the registration every
+  5 seconds until it is accepted.
 
 ## SELinux
 
 Setting `persist.sys.timezone` needs `set_prop(timezone_prop)`, which the default bundle
 domain has not. `product/service_bundle_contexts` maps the bundle to its own domain
-`system_service_bundle` (device/rb3/sdv_media_db845c/sepolicy). It is the only rule the domain
-adds to a service bundle.
+`system_service_bundle` (device/rb3/sdv_media_db845c/sepolicy). The domain adds two rules to
+a service bundle: this one, and reading the CPU quota of its cgroup, which tokio does at start.
