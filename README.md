@@ -217,6 +217,7 @@ source build/envsetup.sh && lunch sdv_media_db845c-trunk_staging-userdebug
 m
 ```
 
+Adding a feature, from a tap on the screen to the device: [Getting started](docs/getting-started.md).
 Flashing the reference board and what runs on it: the README of
 [`device-rb3`](https://github.com/sdv-everyware/device-rb3). Writing your first app on the UI
 library: `vendor/sdv-everyware/ui-lib/scripts/new-app.sh <name>` copies
