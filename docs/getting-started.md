@@ -158,6 +158,9 @@ The screen is a Figma design driven by code.
 
 ## Build and run on the board
 
+A new bundle or a new SELinux domain needs the image first: `m`, then `tools/flash.sh images`
+in `device-rb3`. After that, a changed bundle goes to the board without a flash:
+
 ```bash
 source device/rb3/sdv_media_db845c/tools/env.sh
 # build the two bundles, push them to the board (root, remount, a backup), reboot
@@ -165,9 +168,6 @@ vendor/sdv-everyware/everyware/scripts/deploy-bundle-rb3.sh all led dashboard
 vendor/sdv-everyware/everyware/scripts/run-smarthome-rb3.sh all   # the app with its design
 adb logcat -s led_bundle dashboard_bundle smarthome-app
 ```
-
-A new bundle or a new SELinux domain needs the image: `m`, then `tools/flash.sh images` in
-`device-rb3`.
 
 ## A setting is shorter
 
