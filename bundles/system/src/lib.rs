@@ -53,9 +53,9 @@ use user_preferences_api::user_preferences_registry_service::{RegisterSettingsRe
 ///   time  (v1): timezone, hour_cycle_24
 ///   units (v1): temperature
 /// A new key in `time` makes it ("time", "2"); `units` stays at "1".
+const GROUPS: [(&str, &str); 2] = [(TIME, "1"), (UNITS, "1")];
 const TIME: &str = "time";
 const UNITS: &str = "units";
-const GROUPS: [(&str, &str); 2] = [(TIME, "1"), (UNITS, "1")];
 /// The time zone, an IANA name as UTF-8 bytes (a setting has no string type).
 const TIMEZONE: &str = "timezone";
 /// The clock shows 24 hours (true) or 12 hours with AM and PM (false).
