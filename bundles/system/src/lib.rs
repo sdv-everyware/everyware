@@ -1,4 +1,4 @@
-//! SystemServiceBundle: owns the house's system settings in SDV's user_preferences and applies
+//! SystemServiceBundle: owns the device's system settings in SDV's user_preferences and applies
 //! them. The group `time` holds the time zone (an IANA name, applied to the system through
 //! `persist.sys.timezone`, which bionic reads) and whether the clock shows 24 hours (applied by
 //! the screens that draw a clock).
@@ -10,7 +10,7 @@
 //! (UserControllableService::RequestSettingsChange), the bundle applies it and answers with the
 //! value in force, which user_preferences keeps and sends to the screens.
 //!
-//! The settings are SHARED (the house's, not a user's). user_preferences pushes no SHARED value
+//! The settings are SHARED (the device's, not a user's). user_preferences pushes no SHARED value
 //! to its owner at start and keeps whatever the owner reports, so the bundle is their source of
 //! truth at boot: the time zone survives a reboot in its property, the clock's format in the
 //! bundle's own directory.
@@ -52,7 +52,7 @@ const TIMEZONE_PROPERTY: &str = "persist.sys.timezone";
 const TZDATA: [&str; 2] = ["/apex/com.android.tzdata/etc/tz/tzdata", "/system/usr/share/zoneinfo/tzdata"];
 /// The clock's format, kept in the bundle's directory (the time zone has its property).
 const HOUR_CYCLE_FILE: &str = "hour_cycle_24.pb";
-/// A kept setting is good for as long as the house stands.
+/// A kept setting is good for the life of the device.
 const KEPT: Duration = Duration::from_secs(100 * 365 * 24 * 3600);
 /// Between two attempts to register when user_preferences refused or was not there.
 const RETRY: Duration = Duration::from_secs(5);
