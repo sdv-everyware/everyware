@@ -9,6 +9,10 @@
 #   "<url> Loaded successfully."   -> loaded
 #   "<url> <what>: <why>"          -> failed      (Cog's load-failed and TLS messages)
 #
+# A renderer that ended ("<url> Crash!: ...", the relay ends a page that hangs) makes Cog load
+# a page of its own: its "Loading..." and "Loaded successfully." are not the page the
+# dashboard waits for and say nothing.
+#
 # about:blank (the dashboard's own "empty") says nothing. Only words, never the URL: the app
 # takes three known words and drops anything else. Without the FIFO Cog runs as before.
 FIFO=/run/har/har-browser-events
@@ -17,12 +21,14 @@ LOG=/home/browser/cog.log
 # tested first: a redirection that fails ends a POSIX shell, an || after it never runs
 [ -p "$FIFO" ] || exec cog --platform=wl "$@" >>"$LOG" 2>&1
 exec 3<>"$FIFO"
+crashed=0
 cog --platform=wl "$@" 2>&1 | while IFS= read -r line; do
   printf '%s\n' "$line" >>"$LOG"
   case "$line" in
     *"<about:blank> "*) ;;
-    *"> Loading...") echo committed >&3 ;;
-    *"> Loaded successfully.") echo loaded >&3 ;;
+    *"> Crash!: "*) crashed=2 ;;
+    *"> Loading...") if [ "$crashed" -gt 0 ]; then crashed=$((crashed - 1)); else echo committed >&3; fi ;;
+    *"> Loaded successfully.") if [ "$crashed" -gt 0 ]; then crashed=$((crashed - 1)); else echo loaded >&3; fi ;;
     *"> Load started.") ;;
     "Cog-Core-Message:"*"> "*": "*) echo failed >&3 ;;
   esac
