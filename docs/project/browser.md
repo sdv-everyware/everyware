@@ -49,8 +49,14 @@ browser.
 
 ## The Debian root, once per board
 
-The root is a Debian 13 (trixie) arm64 root file system unpacked on the board, with Cog
-installed in it from Debian's own packages:
+`scripts/browser-root.sh [-s SERIAL]` sets it up on any board over adb (arm64 or amd64, from the
+device's ABI): the layer of Docker Hub's official `debian:trixie` image, its sha256 checked,
+unpacked into `/data/glibc/rootfs`, then Cog, D-Bus and `libgles2` from Debian with apt, and the
+user `browser`. The device needs its network; a root that has Cog already is left as it is. By
+hand, the same steps:
+
+The root is a Debian 13 (trixie) root file system unpacked on the board, with Cog installed in
+it from Debian's own packages:
 
 1. Unpack an arm64 `debian:trixie` root file system into `/data/glibc/rootfs` (for example the
    export of the Docker image of that name).
