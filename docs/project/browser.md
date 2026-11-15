@@ -82,6 +82,31 @@ For trying things with apt, `scripts/browser-root.sh -s <serial>` makes the same
 in `/data/glibc/rootfs`, entered by hand with `glibc-enter.sh` or by `run-browser-rb3.sh`
 (below). The service never runs it: it runs as root, and runs only the APEX's root.
 
+### The first build with the browser on a new machine
+
+The image of the root comes from a running device, so the first build takes two rounds. On
+Cuttlefish (amd64):
+
+```
+# 1. an image without the browser, and the VM
+bash -c "source device/cf-everyware/sdv_media_everyware_cf/tools/env.sh && m"
+CF_STATIC_WIFI=1 device/cf-everyware/sdv_media_everyware_cf/tools/run.sh start
+
+# 2. the root, made on the VM (it needs the network), copied to browser/apex/prebuilt/amd64/
+vendor/sdv-everyware/everyware/scripts/browser-root.sh -s 0.0.0.0:6526 --export
+
+# 3. the image with the browser, and the VM again with it
+EVERYWARE_EXPERIMENTAL_BROWSER=true bash -c "source device/cf-everyware/sdv_media_everyware_cf/tools/env.sh && m"
+device/cf-everyware/sdv_media_everyware_cf/tools/run.sh rm
+CF_STATIC_WIFI=1 device/cf-everyware/sdv_media_everyware_cf/tools/run.sh start
+```
+
+`CF_STATIC_WIFI=1` is for a host whose firewall drops DHCP on Cuttlefish's bridge. When another
+machine already has the image, steps 1 and 2 are not needed: copy `rootfs.erofs` and
+`rootfs.erofs.manifest` of `browser/apex/prebuilt/<arch>/` from it. The build checks them
+against `root.lock` as it checks its own. The RB3 and the Pi 5 work the same way, with their
+own `tools/env.sh` and the board's serial.
+
 ## How it starts
 
 ```
