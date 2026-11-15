@@ -11,7 +11,10 @@
 # connection and spins one core, so the script must not leave it running without a panel.
 # Without a Debian root on the device there is no browser: the script says so and ends.
 RUN=/data/vendor/everyware/run
-R=/data/glibc/rootfs
+# The Debian root: the image's, read-only (the APEX com.everyware.browser, mounted by its rc),
+# with the browser's home from /data. Never a root on /data: this service runs as root, and
+# what it runs must be verified (a root written to /data once would run at every boot).
+R=/mnt/vendor/everyware_browser
 ENTER=/vendor/bin/glibc-enter.sh
 # the helper scripts of the image, as the root sees them (glibc-enter.sh binds the directory)
 LIB=/usr/local/lib/har-browser
@@ -20,11 +23,12 @@ BROWSER_ID=2900
 BUS=unix:path=/tmp/har-dbus/bus
 log() { /vendor/bin/log -t everyware_browser "$*"; }
 
-[ -x $R/usr/bin/cog ] || { log "no Debian root with Cog at $R: no browser"; exit 0; }
+[ -x $R/usr/bin/cog ] || { log "no Debian root with Cog at $R (com.everyware.browser): no browser"; exit 0; }
 grep -q '^browser:' $R/etc/passwd || { log "the Debian root has no user browser: no browser"; exit 0; }
 [ -d $R/home/browser ] || { log "the Debian root has no /home/browser: no browser"; exit 0; }
 
 export GLIBC_ROOT=$R HAR_SOCKET_DIR=$RUN HAR_BROWSER_LIB=/vendor/etc/everyware/browser
+export HAR_BROWSER_HOME=/data/vendor/everyware_browser
 # as the browser's user inside the root, with the environment given as arguments
 as_browser() { /vendor/bin/sh $ENTER /bin/sh -c "exec runuser -u browser -- env $*"; }
 

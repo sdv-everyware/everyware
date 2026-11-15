@@ -16,13 +16,15 @@ PRODUCT_PACKAGES += \
 # runs WPE WebKit from a Debian root, entered as root, without WebKit's sandbox. Turn it on with
 # EVERYWARE_EXPERIMENTAL_BROWSER=true (in the environment or the product): the image then gets the
 # service, its script, the launcher of the Debian root, the helper scripts and the bus
-# configuration the root reads, and ro.vendor.everyware.browser=true, by which the panel opens a
-# story there. The root itself is not part of the image; without it the service ends at once.
+# configuration the root reads, ro.vendor.everyware.browser=true, by which the panel opens a
+# story there, and the Debian root as the APEX com.everyware.browser (browser/apex). Its image
+# is made once per architecture with scripts/browser-root.sh --export; the build stops without it.
 # Design: https://github.com/sdv-everyware/everyware/issues/24; security:
 # https://github.com/sdv-everyware/everyware/issues/54.
 EVERYWARE_EXPERIMENTAL_BROWSER ?= false
 ifeq ($(EVERYWARE_EXPERIMENTAL_BROWSER),true)
 PRODUCT_VENDOR_PROPERTIES += ro.vendor.everyware.browser=true
+PRODUCT_PACKAGES += com.everyware.browser
 PRODUCT_COPY_FILES += \
     vendor/sdv-everyware/everyware/product/everyware_browser.rc:$(TARGET_COPY_OUT_VENDOR)/etc/init/everyware_browser.rc \
     vendor/sdv-everyware/everyware/scripts/everyware-browser.sh:$(TARGET_COPY_OUT_VENDOR)/bin/everyware-browser.sh \

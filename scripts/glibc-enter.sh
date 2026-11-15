@@ -12,6 +12,9 @@
 # Inside: XDG_RUNTIME_DIR=/run/har is the master's socket directory (HAR_SOCKET_DIR; without
 # it /data/local/tmp, where a developer's build of the panel listens as har-display),
 # WAYLAND_DISPLAY=har-display.
+# The root may be read-only (GLIBC_ROOT: the image of com.everyware.browser): what is written at
+# run time goes to tmpfs mounts (/dev, /tmp, /run, with resolv.conf and machine-id) and to
+# HAR_BROWSER_HOME, a directory bound at /home/browser.
 # DNS: the Wi-Fi DHCP lease (vendor.net.wlan0.dns*), as Android's own resolver has no glibc side.
 set -e
 # init starts a service with umask 077: the directories, the device nodes' parents and
@@ -54,12 +57,17 @@ mkdir -p "$R/dev/pts"
 mounted "$R/dev/pts" || mount -t devpts -o newinstance,ptmxmode=0666 devpts "$R/dev/pts"
 mounted "$R/dev/shm" || { mkdir -p "$R/dev/shm"; mount -t tmpfs -o mode=1777 tmpfs "$R/dev/shm"; }
 mounted "$R/tmp" || mount -t tmpfs -o mode=1777 tmpfs "$R/tmp"
+mounted "$R/run" || mount -t tmpfs -o mode=0755,nosuid,nodev tmpfs "$R/run"
 bind "$SOCKDIR" "$R/run/har"
 # the browser's helper scripts from the image (everyware-browser.sh), read by the root's shell
 [ -n "$HAR_BROWSER_LIB" ] && bind "$HAR_BROWSER_LIB" "$R/usr/local/lib/har-browser"
+# the browser's home, where the root is read-only (everyware-browser.sh)
+[ -n "$HAR_BROWSER_HOME" ] && bind "$HAR_BROWSER_HOME" "$R/home/browser"
 
-# written beside and moved in place: two callers may enter at the same time
-resolv="$R/etc/resolv.conf.$$"
+# in /run, where /etc/resolv.conf points (browser-root.sh --export makes the link; a writable
+# root gets it here). Written beside and moved in place: two callers may enter at the same time.
+[ -L "$R/etc/resolv.conf" ] || ln -sf ../run/resolv.conf "$R/etc/resolv.conf"
+resolv="$R/run/resolv.conf.$$"
 : > "$resolv"
 for n in 1 2 3 4; do
   # by its path: a vendor shell (init's service) has only /vendor/bin on its PATH, and there
@@ -68,7 +76,13 @@ for n in 1 2 3 4; do
   [ -n "$d" ] && echo "nameserver $d" >> "$resolv"
 done
 [ -s "$resolv" ] || echo "nameserver 8.8.8.8" > "$resolv"
-mv "$resolv" "$R/etc/resolv.conf"
+mv "$resolv" "$R/run/resolv.conf"
+# the machine id D-Bus reads (/etc/machine-id of an exported root points here): one per boot,
+# not one for every board of the image
+if [ ! -s "$R/run/machine-id" ]; then
+    tr -d '-' < /proc/sys/kernel/random/uuid > "$R/run/machine-id.$$"
+    mv "$R/run/machine-id.$$" "$R/run/machine-id"
+fi
 
 [ $# -gt 0 ] || set -- /bin/bash -l
 exec chroot "$R" /usr/bin/env -i \

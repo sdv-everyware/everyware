@@ -9,8 +9,8 @@ Its open security problems: [#54](https://github.com/sdv-everyware/everyware/iss
 A web page runs in a process of its own and shows in the panel's right side; a tap on a news
 story opens its page there. A fault in the browser never takes the dashboard. The device has no
 browser of its own (no Java, no WebView), so the browser comes from a Debian root next to the
-system. An image built with the flag starts it by itself when the device has that root; the root is put on the
-device once and is not part of the image.
+system. An image built with the flag carries that root as the APEX `com.everyware.browser`
+and starts the browser by itself.
 
 ## What runs
 
@@ -30,7 +30,8 @@ cog --platform=wl URL                        WPE WebKit in a Debian root, user b
 | zone tag | `#zone/browser`: with the flag, every ordinary Wayland window goes there (`xdg_default_tag` in smarthome-app's `main.rs`) |
 | page control | FIFO `har-browser-open` in the runtime directory -> `har-browser-relay` (user browser) -> `cogctl open` over a D-Bus bus that exists only inside the root |
 | page state | Cog's output -> `har-browser-cog` -> FIFO `har-browser-events` in the runtime directory (`committed`, `loaded`, `failed`) -> the panel's loader |
-| Debian root | `/data/glibc/rootfs`, entered with `scripts/glibc-enter.sh` (chroot, a `/dev` of its own, the socket directory as `/run/har`, DNS from the Wi-Fi lease) |
+| Debian root | `/mnt/vendor/everyware_browser`, read-only: `rootfs.erofs` of the APEX `com.everyware.browser`, mounted by the APEX's rc (`nosuid`, SELinux type `everyware_browser_root_file`). Entered with `scripts/glibc-enter.sh`: chroot, a `/dev` of its own, `/run` and `/tmp` as tmpfs, the socket directory as `/run/har`, DNS from the Wi-Fi lease, a machine id per boot |
+| browser home | `/data/vendor/everyware_browser` (0700, user browser), bound at `/home/browser`: logs and WebKit's data |
 | browser user | `browser`, uid and gid 2900 (OEM range, no Android uid has it) |
 
 ## Turning it on
@@ -40,49 +41,64 @@ export EVERYWARE_EXPERIMENTAL_BROWSER=true   # or set it in the product's makefi
 m
 ```
 
-The image then has the service `everyware_browser`, its scripts, and
-`ro.vendor.everyware.browser=true`. The panel reads that property once at start: with it, a tap
+The image then has the service `everyware_browser`, its scripts, the APEX
+`com.everyware.browser` with the Debian root, and `ro.vendor.everyware.browser=true`. The build
+stops when the root's image of the architecture is missing (next section). The panel reads that property once at start: with it, a tap
 on a story opens the page, and an ordinary Wayland window (Cog) shows in the panel. Without it the
 panel keeps its Wayland socket for harry's own clients (`har_zone`) and gives no zone to other
 windows. The variable lives in the shell: a later `m` without it builds the image without the
 browser.
 
-## The Debian root, once per board
+## The Debian root
 
-`scripts/browser-root.sh [-s SERIAL]` sets it up on any board over adb (arm64 or amd64, from the
-device's ABI): the layer of Docker Hub's official `debian:trixie` image, its sha256 checked,
-unpacked into `/data/glibc/rootfs`, then Cog, D-Bus and `libgles2` from Debian with apt, and the
-user `browser`. The device needs its network; a root that has Cog already is left as it is. By
-hand, the same steps:
+The root is Debian 13 (trixie) with Cog, D-Bus and `libgles2` from Debian's own packages, and
+the user `browser`. It goes into the image as one erofs file, as `com.android.virt` carries
+Microdroid's images. The file is made once per architecture on a board and is not in git:
 
-The root is a Debian 13 (trixie) root file system unpacked on the board, with Cog installed in
-it from Debian's own packages:
+```
+scripts/browser-root.sh -s <serial> --export     # on an arm64 board (RB3, Pi 5) or Cuttlefish (amd64)
+```
 
-1. Unpack an arm64 `debian:trixie` root file system into `/data/glibc/rootfs` (for example the
-   export of the Docker image of that name).
-2. `adb push scripts/glibc-enter.sh /data/glibc/`
-3. In the root (`adb shell sh /data/glibc/glibc-enter.sh`): `apt-get update`, then
-   `apt-get install -y cog dbus`, then a user `browser` with uid and gid 2900 and the home
-   `/home/browser`.
-4. Reboot, or `adb shell start everyware_browser` (an image built with the flag): the service
-   looks for the root when the panel starts.
+| Step | Where | What |
+|---|---|---|
+| base | host | the layer of Docker Hub's `debian:trixie` for the architecture, its sha256 checked |
+| packages | board | apt from snapshot.debian.org at the date the layer was made from: the archive as it was then, its signature checked |
+| read-only | board | `resolv.conf` and `machine-id` point to `/run`; no apt lists, no logs |
+| image | host | the tree's `mkfs.erofs` -> `browser/apex/prebuilt/<arch>/rootfs.erofs` and its manifest |
+
+`browser/apex/root.lock` is in git: per architecture the layer, the snapshot date and every
+package with its version. The first export of an architecture writes its lines; a later export
+makes the same root, or stops when the packages differ (`--update-lock` takes the new ones).
+At build time `check-root.sh` takes the image into the APEX only when its sha256 is the one of
+its manifest and the manifest's versions are the ones of the lock.
+
+An image built with the browser carries Debian's binaries. Whoever publishes such an image owes
+their sources (GPL and LGPL); `root.lock` names every version, and snapshot.debian.org keeps the
+sources of each.
+
+For trying things with apt, `scripts/browser-root.sh -s <serial>` makes the same root writable
+in `/data/glibc/rootfs`, entered by hand with `glibc-enter.sh`. The service never runs it: it
+runs as root, and runs only the APEX's root, which is verified.
 
 ## How it starts
 
 ```
 init: apex.all.ready -> mkdir /data/vendor/everyware/run (0750 root:2900) -> start smarthome
    the panel serves har-display there (init.smarthome.rc of smarthome-app's APEX)
+init: apex.all.ready -> mount the root read-only at /mnt/vendor/everyware_browser,
+   mkdir /data/vendor/everyware_browser (com.everyware.browser.rc of the browser's APEX)
 init: smarthome running -> start everyware_browser (product/everyware_browser.rc)
-   everyware-browser.sh: no root on the device -> ends
+   everyware-browser.sh: no root at /mnt/vendor/everyware_browser -> ends
                          else: the socket and the two FIFOs for the group 2900, then in the
                          root as the user browser: the bus, Cog, the relay; when one of them
                          ends or the panel restarts, all three are started again
 ```
 
-The files of the image: `/vendor/bin/everyware-browser.sh`, `/vendor/bin/glibc-enter.sh`, and
-in `/vendor/etc/everyware/browser` the two helper scripts and the bus configuration, which
-the root sees as `/usr/local/lib/har-browser`. Logs: `logcat -s everyware_browser`, and Cog's
-in the root, `/home/browser/cog.log`.
+The files of the image: `/vendor/bin/everyware-browser.sh`, `/vendor/bin/glibc-enter.sh`, in
+`/vendor/etc/everyware/browser` the two helper scripts and the bus configuration, which the root
+sees as `/usr/local/lib/har-browser`, and `/vendor/apex/com.everyware.browser.apex`. Logs:
+`logcat -s everyware_browser`, and Cog's in the browser's home,
+`/data/vendor/everyware_browser/cog.log`.
 
 ## A developer's build of the panel
 
@@ -132,13 +148,17 @@ and `har_zone` for harry clients.
 | The D-Bus bus | narrowed | a socket in a 0700 directory of the user browser, no service activation (`browser-bus.conf`) |
 | The pages the household reads | host only in the log | the app logs the host, the relay logs no URL |
 | A hidden page keeps running | mostly closed | the app sends `about:blank` when the panel closes |
+| The root changed on the board | closed | a read-only image in the APEX (dm-verity; vendor under AVB), only the home is writable |
+| Set-user-ID programs of the root (`su`, `mount`, `passwd`) | closed | the root is mounted `nosuid` |
+| One machine id on every board of an image | closed | made per boot in the root's `/run` |
+| Packages changed on the way | closed | apt checks the signature of the Debian archive; the versions are locked in `root.lock` |
 | A page reaches services on localhost or the LAN | open | needs a packet filter by the browser's uid |
 | WebKit's sandbox is off, the root is entered as root | open | the kernel has no user namespaces; a product needs an SELinux domain and seccomp around the browser |
 
 ## Open
 
-1. The root as a part of the image (built from pinned packages), and the rules of the
-   browser's SELinux domain, which is permissive for now.
+1. The rules of the browser's SELinux domain, which is permissive for now, and of init's mount
+   of the root.
 2. Keyboard input into a page.
 3. The page's real host in the title bar, back and reload.
 4. Sound from a page.

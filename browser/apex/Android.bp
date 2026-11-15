@@ -1,0 +1,102 @@
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//      http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+// com.everyware.browser: the Debian root of the panel's experimental browser (Cog, WPE WebKit)
+// as one read-only file system image, etc/fs/rootfs.erofs, as com.android.virt carries the
+// images of Microdroid. The APEX's rc mounts it; everyware-browser.sh enters it. In the product
+// only with EVERYWARE_EXPERIMENTAL_BROWSER=true (product/everyware.mk); docs/project/browser.md.
+//
+// The image is not in git. scripts/browser-root.sh --export makes it on a board of the
+// architecture, into prebuilt/<arch>/ beside its manifest. The build checks both against
+// root.lock (check-root.sh): the image is the one the export made, from the locked versions.
+
+package {
+    default_applicable_licenses: ["Android-Apache-2.0"],
+}
+
+apex {
+    name: "com.everyware.browser",
+    manifest: "apex_manifest.json",
+    file_contexts: "file_contexts",
+    key: "com.everyware.browser.key",
+    updatable: false,
+    // in /vendor/apex, beside the browser's service and scripts
+    soc_specific: true,
+    prebuilts: [
+        "com.everyware.browser.rc",
+        "com.everyware.browser.rootfs",
+    ],
+    arch: {
+        riscv64: {
+            enabled: false,
+        },
+    },
+}
+
+// Test key, generated for this project. A device that ships signs with its own.
+apex_key {
+    name: "com.everyware.browser.key",
+    public_key: "keys/com.everyware.browser.avbpubkey",
+    private_key: "keys/com.everyware.browser.pem",
+}
+
+prebuilt_etc {
+    name: "com.everyware.browser.rc",
+    src: "com.everyware.browser.rc",
+    installable: false,
+}
+
+prebuilt_etc {
+    name: "com.everyware.browser.rootfs",
+    filename: "rootfs.erofs",
+    relative_install_path: "fs",
+    installable: false,
+    src: ":com.everyware.browser.rootfs-none",
+    arch: {
+        arm64: {
+            src: ":com.everyware.browser.rootfs-arm64",
+        },
+        x86_64: {
+            src: ":com.everyware.browser.rootfs-amd64",
+        },
+    },
+}
+
+// The exported image of each architecture. srcs is a glob: a tree without the image still
+// builds every other module, and check-root.sh says what to do when the APEX is built.
+genrule {
+    name: "com.everyware.browser.rootfs-arm64",
+    srcs: ["prebuilt/arm64/*"],
+    tool_files: [
+        "check-root.sh",
+        "root.lock",
+    ],
+    out: ["rootfs.erofs"],
+    cmd: "$(location check-root.sh) arm64 $(location root.lock) $(out) $(in)",
+}
+
+genrule {
+    name: "com.everyware.browser.rootfs-amd64",
+    srcs: ["prebuilt/amd64/*"],
+    tool_files: [
+        "check-root.sh",
+        "root.lock",
+    ],
+    out: ["rootfs.erofs"],
+    cmd: "$(location check-root.sh) amd64 $(location root.lock) $(out) $(in)",
+}
+
+genrule {
+    name: "com.everyware.browser.rootfs-none",
+    out: ["rootfs.erofs"],
+    cmd: "echo 'com.everyware.browser: no Debian root for this architecture (arm64 and x86_64 only)' >&2; exit 1",
+}

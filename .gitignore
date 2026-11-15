@@ -2,3 +2,6 @@
 
 # the Figma file key of the current design: local only, never committed
 scripts/figma-key
+
+# the image of the browser's Debian root: made by scripts/browser-root.sh --export, local only
+browser/apex/prebuilt/

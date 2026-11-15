@@ -1,0 +1,23 @@
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#      http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# The Debian root of the panel's browser: this APEX's rootfs.erofs, read-only, where
+# everyware-browser.sh enters it. On the trigger that starts the panel; the browser starts when
+# the panel runs, a later event, so the root is there before it.
+#   nosuid   the root has set-user-ID programs (su, mount, passwd); the browser needs none
+#   context  its own file type (the device's everyware_browser.te), for the rules of an
+#            enforcing board
+on property:apex.all.ready=true
+    mkdir /mnt/vendor/everyware_browser 0755 root root
+    mount erofs loop@/apex/com.everyware.browser/etc/fs/rootfs.erofs /mnt/vendor/everyware_browser ro nosuid nodev context=u:object_r:everyware_browser_root_file:s0
+    # the browser's home: the root is read-only, its user keeps its logs and WebKit's data here
+    mkdir /data/vendor/everyware_browser 0700 oem_2900 oem_2900
