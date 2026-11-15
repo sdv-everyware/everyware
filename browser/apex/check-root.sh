@@ -20,6 +20,8 @@
 #     of root.lock.
 # This does not prove where the image came from (anyone can write both files); it catches an
 # image copied in part, an old one, or one made from other versions than the tree names.
+# Without an image of the architecture the output is empty: this runs for both architectures
+# (checkbuild), and build/tasks/browser.mk stops a product build that lacks the image of its own.
 #
 #   check-root.sh <arch> <root.lock> <out> <the files of prebuilt/<arch>/>
 set -euo pipefail
@@ -37,9 +39,13 @@ for f in "$@"; do
         */rootfs.erofs.manifest) manifest=$f ;;
     esac
 done
+if [ -z "$image" ] && [ -z "$manifest" ]; then
+    : > "$out"
+    exit 0
+fi
 [ -n "$image" ] && [ -n "$manifest" ] ||
-    fail "no Debian root in browser/apex/prebuilt/$arch: make it on a $arch board with
-    vendor/sdv-everyware/everyware/scripts/browser-root.sh -s <serial> --export"
+    fail "browser/apex/prebuilt/$arch has only one of rootfs.erofs and rootfs.erofs.manifest:
+    copy both again, or export again"
 grep -q "^$arch " "$lock" ||
     fail "root.lock has no lines for $arch: export once on a $arch board, which writes them"
 
@@ -49,6 +55,6 @@ got=$(sha256sum "$image" | cut -d' ' -f1)
     fail "rootfs.erofs is not the image of its manifest (sha256 $got, the manifest has
     ${want:-none}): copy both files again, or export again"
 [ "$(grep "^$arch " "$lock")" = "$(grep "^$arch " "$manifest")" ] ||
-    fail "the image was made from other versions than root.lock names: export again, or take its
-    versions with browser-root.sh --export --update-lock"
+    fail "the image was made from other versions than root.lock names: export again
+    (browser-root.sh -s <serial> --export)"
 cp "$image" "$out"

@@ -25,6 +25,8 @@ EVERYWARE_EXPERIMENTAL_BROWSER ?= false
 ifeq ($(EVERYWARE_EXPERIMENTAL_BROWSER),true)
 PRODUCT_VENDOR_PROPERTIES += ro.vendor.everyware.browser=true
 PRODUCT_PACKAGES += com.everyware.browser
+# the modules of browser/apex exist only then
+$(call soong_config_set_bool,everyware,experimental_browser,true)
 PRODUCT_COPY_FILES += \
     vendor/sdv-everyware/everyware/product/everyware_browser.rc:$(TARGET_COPY_OUT_VENDOR)/etc/init/everyware_browser.rc \
     vendor/sdv-everyware/everyware/scripts/everyware-browser.sh:$(TARGET_COPY_OUT_VENDOR)/bin/everyware-browser.sh \

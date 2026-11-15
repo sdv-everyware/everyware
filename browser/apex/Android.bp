@@ -17,7 +17,10 @@
 //
 // The image is not in git. scripts/browser-root.sh --export makes it on a board of the
 // architecture, into prebuilt/<arch>/ beside its manifest. The build checks both against
-// root.lock (check-root.sh): the image is the one the export made, from the locked versions.
+// root.lock (check-root.sh: the image matches its manifest, made from the locked versions).
+// The modules that need the image exist only with the flag (soong config everyware
+// experimental_browser, set by everyware.mk); build/tasks/browser.mk stops a build with the
+// flag that has no image of its architecture.
 
 package {
     default_applicable_licenses: ["Android-Apache-2.0"],
@@ -25,6 +28,10 @@ package {
 
 apex {
     name: "com.everyware.browser",
+    enabled: select(soong_config_variable("everyware", "experimental_browser"), {
+        true: true,
+        default: false,
+    }),
     manifest: "apex_manifest.json",
     file_contexts: "file_contexts",
     key: "com.everyware.browser.key",
@@ -57,10 +64,13 @@ prebuilt_etc {
 
 prebuilt_etc {
     name: "com.everyware.browser.rootfs",
+    enabled: select(soong_config_variable("everyware", "experimental_browser"), {
+        true: true,
+        default: false,
+    }),
     filename: "rootfs.erofs",
     relative_install_path: "fs",
     installable: false,
-    src: ":com.everyware.browser.rootfs-none",
     arch: {
         arm64: {
             src: ":com.everyware.browser.rootfs-arm64",
@@ -71,10 +81,14 @@ prebuilt_etc {
     },
 }
 
-// The exported image of each architecture. srcs is a glob: a tree without the image still
-// builds every other module, and check-root.sh says what to do when the APEX is built.
+// The exported image of each architecture. srcs is a glob: the image is not in git, and a tree
+// without it is still read.
 genrule {
     name: "com.everyware.browser.rootfs-arm64",
+    enabled: select(soong_config_variable("everyware", "experimental_browser"), {
+        true: true,
+        default: false,
+    }),
     srcs: ["prebuilt/arm64/*"],
     tool_files: [
         "check-root.sh",
@@ -86,6 +100,10 @@ genrule {
 
 genrule {
     name: "com.everyware.browser.rootfs-amd64",
+    enabled: select(soong_config_variable("everyware", "experimental_browser"), {
+        true: true,
+        default: false,
+    }),
     srcs: ["prebuilt/amd64/*"],
     tool_files: [
         "check-root.sh",
@@ -93,10 +111,4 @@ genrule {
     ],
     out: ["rootfs.erofs"],
     cmd: "$(location check-root.sh) amd64 $(location root.lock) $(out) $(in)",
-}
-
-genrule {
-    name: "com.everyware.browser.rootfs-none",
-    out: ["rootfs.erofs"],
-    cmd: "echo 'com.everyware.browser: no Debian root for this architecture (arm64 and x86_64 only)' >&2; exit 1",
 }

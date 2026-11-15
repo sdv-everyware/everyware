@@ -1,8 +1,9 @@
 #!/system/bin/sh
-# glibc-enter.sh -- run a command inside the Debian (glibc) root on the device, as a Wayland
-# client of the HAR master. The development form of the glibc layer: a chroot under /data, runtime mounts
-# only, root, the SELinux domain of the caller (the board is permissive). The product form is
-# an APEX with its own domain (docs/project/browser.md, Open).
+# glibc-enter.sh -- run a command inside a Debian (glibc) root on the device, as a Wayland
+# client of the HAR master: the browser's read-only root of the APEX com.everyware.browser
+# (everyware-browser.sh), or a writable one under /data for trying things (the default). A
+# chroot with runtime mounts only, as root, in the SELinux domain of the caller (the boards are
+# permissive; docs/project/browser.md, Open).
 #
 # On the device (adb root):
 #   sh /data/glibc/glibc-enter.sh                    # a shell inside Debian
@@ -55,8 +56,8 @@ done
 [ "${HAR_CHROOT_SND:-0}" = 1 ] && bind /dev/snd "$R/dev/snd"
 mkdir -p "$R/dev/pts"
 mounted "$R/dev/pts" || mount -t devpts -o newinstance,ptmxmode=0666 devpts "$R/dev/pts"
-mounted "$R/dev/shm" || { mkdir -p "$R/dev/shm"; mount -t tmpfs -o mode=1777 tmpfs "$R/dev/shm"; }
-mounted "$R/tmp" || mount -t tmpfs -o mode=1777 tmpfs "$R/tmp"
+mounted "$R/dev/shm" || { mkdir -p "$R/dev/shm"; mount -t tmpfs -o mode=1777,nosuid,nodev tmpfs "$R/dev/shm"; }
+mounted "$R/tmp" || mount -t tmpfs -o mode=1777,nosuid,nodev tmpfs "$R/tmp"
 mounted "$R/run" || mount -t tmpfs -o mode=0755,nosuid,nodev tmpfs "$R/run"
 bind "$SOCKDIR" "$R/run/har"
 # the browser's helper scripts from the image (everyware-browser.sh), read by the root's shell

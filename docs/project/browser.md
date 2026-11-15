@@ -68,17 +68,19 @@ scripts/browser-root.sh -s <serial> --export     # on an arm64 board (RB3, Pi 5)
 
 `browser/apex/root.lock` is in git: per architecture the layer, the snapshot date and every
 package with its version. The first export of an architecture writes its lines; a later export
-makes the same root, or stops when the packages differ (`--update-lock` takes the new ones).
+makes the same root, or stops when the packages differ. `--update-lock` moves to the newest
+`debian:trixie` layer and its snapshot (Debian's updates since) and writes the lock again.
 At build time `check-root.sh` takes the image into the APEX only when its sha256 is the one of
-its manifest and the manifest's versions are the ones of the lock.
+its manifest and the manifest's versions are the ones of the lock. A build with the flag and
+without the image of its architecture stops at once (`build/tasks/browser.mk`).
 
 An image built with the browser carries Debian's binaries. Whoever publishes such an image owes
 their sources (GPL and LGPL); `root.lock` names every version, and snapshot.debian.org keeps the
 sources of each.
 
 For trying things with apt, `scripts/browser-root.sh -s <serial>` makes the same root writable
-in `/data/glibc/rootfs`, entered by hand with `glibc-enter.sh`. The service never runs it: it
-runs as root, and runs only the APEX's root, which is verified.
+in `/data/glibc/rootfs`, entered by hand with `glibc-enter.sh` or by `run-browser-rb3.sh`
+(below). The service never runs it: it runs as root, and runs only the APEX's root.
 
 ## How it starts
 
@@ -110,7 +112,8 @@ vendor/sdv-everyware/everyware/scripts/run-browser-rb3.sh stop       # the insta
 ```
 
 It needs an image built with the flag (the panel reads `ro.vendor.everyware.browser`); without
-it `start` stops with a message. `start` stops the installed panel and browser and runs the built panel from `/data/local/tmp`
+it `start` stops with a message. Cog runs from the writable root in `/data/glibc/rootfs`
+(`browser-root.sh` without `--export`), not from the APEX. `start` stops the installed panel and browser and runs the built panel from `/data/local/tmp`
 with zones on (socket and FIFOs there); nothing in the image changes, and a reboot brings the
 installed ones back.
 
@@ -148,7 +151,7 @@ and `har_zone` for harry clients.
 | The D-Bus bus | narrowed | a socket in a 0700 directory of the user browser, no service activation (`browser-bus.conf`) |
 | The pages the household reads | host only in the log | the app logs the host, the relay logs no URL |
 | A hidden page keeps running | mostly closed | the app sends `about:blank` when the panel closes |
-| The root changed on the board | closed | a read-only image in the APEX (dm-verity; vendor under AVB), only the home is writable |
+| The root changed on the board | mostly closed | a read-only image in the APEX, signed (apexd checks the signature at activation). The image's blocks are checked at run time only where vendor is under AVB (Cuttlefish; not the RB3 and the Pi 5, whose vendor has no `avb` in its fstab). Writable: the home, `/tmp`, `/dev/shm` and `/run` (tmpfs) |
 | Set-user-ID programs of the root (`su`, `mount`, `passwd`) | closed | the root is mounted `nosuid` |
 | One machine id on every board of an image | closed | made per boot in the root's `/run` |
 | Packages changed on the way | closed | apt checks the signature of the Debian archive; the versions are locked in `root.lock` |

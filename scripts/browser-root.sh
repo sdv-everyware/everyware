@@ -21,7 +21,7 @@
 #       host. Local only, not in git; the build checks it against browser/apex/root.lock.
 #   browser-root.sh [-s SERIAL] [--force]
 #       the same root in /data/glibc/rootfs, writable, for trying things with apt, entered by
-#       hand. The service never runs it: it runs only the APEX's root, which is verified.
+#       hand or by run-browser-rb3.sh. The service never runs it: it runs only the APEX's root.
 #
 # The root, the same each time for one root.lock:
 #   1. Debian 13 (trixie): the layer of Docker Hub's official debian:trixie image for the
@@ -33,8 +33,9 @@
 #      browser (uid and gid 2900);
 #   4. --export: the root made read-only (resolv.conf and machine-id in /run, which
 #      glibc-enter.sh writes; no apt lists or logs), its packages compared with root.lock (a
-#      root.lock without the architecture gets its lines; --update-lock takes new ones), then
-#      packed on the host with the tree's mkfs.erofs.
+#      root.lock without the architecture gets its lines), then packed on the host with the
+#      tree's mkfs.erofs. --update-lock leaves the lock aside: the newest debian:trixie layer and
+#      its snapshot, and the lock rewritten from them (Debian's updates since the last lock).
 set -euo pipefail
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
@@ -83,6 +84,24 @@ if [ "$UPDATE_LOCK" = 1 ]; then
     lock_layer= lock_snapshot=
 fi
 
+# Everything glibc-enter.sh mounted in the root (the panel's socket directory at /run/har, proc,
+# a /dev), the deepest first. Before anything removes the root: rm goes through a bind mount.
+unmount_root() {
+    A shell "grep ' $R/' /proc/mounts | cut -d' ' -f2 | sort -r | while read -r m; do umount -l \$m; done"
+    if A shell "grep -q ' $R/' /proc/mounts"; then
+        echo "!! $R still has mounts: not removed" >&2
+        return 1
+    fi
+}
+# an export that stops half way leaves no root, tar or mounts behind
+cleanup() {
+    [ "$EXPORT" = 1 ] || return 0
+    unmount_root || return 0
+    A shell "rm -rf $R /data/glibc/export.tar" || true
+    rm -f "$CACHE/browser-root-$arch.tar"
+}
+trap cleanup EXIT
+
 # 1. the layer of debian:trixie for this architecture, from Docker Hub's registry API: the one
 # of root.lock, or the newest
 mkdir -p "$CACHE"
@@ -128,11 +147,12 @@ PY
 echo "debian:trixie $arch: $digest"
 
 # what an earlier run left counts as free
+unmount_root
 A shell "rm -rf $R /data/glibc/export.tar"
 free_mb=$(( $(A shell "df -k /data | tail -1" | awk '{print $4}') / 1024 ))
 if [ "$free_mb" -lt "$NEED_MB" ]; then
     echo "!! /data has $free_mb MB free, the root needs about $NEED_MB MB" >&2
-    echo "   (Cuttlefish: an image with EVERYWARE_EXPERIMENTAL_BROWSER=true has a 4 GiB /data)" >&2
+    echo "   (Cuttlefish: sdv_media_everyware_cf has a 4 GiB /data)" >&2
     exit 1
 fi
 
@@ -193,12 +213,7 @@ enter "/bin/sh -c '
 '"
 packages=$(A shell "cat $R/run/packages" | tr -d '\r')
 [ -n "$packages" ] || { echo "!! no package list from the root" >&2; exit 1; }
-# everything glibc-enter.sh mounted in the root, the deepest first
-A shell "grep ' $R/' /proc/mounts | cut -d' ' -f2 | sort -r | while read -r m; do umount -l \$m; done"
-if A shell "grep -q ' $R/' /proc/mounts"; then
-    echo "!! $R still has mounts" >&2
-    exit 1
-fi
+unmount_root
 
 lines=$(
     echo "$arch layer $digest"
@@ -209,14 +224,15 @@ locked=$(grep "^$arch " "$LOCK" || true)
 if [ -n "$locked" ] && [ "$UPDATE_LOCK" = 0 ] && [ "$locked" != "$lines" ]; then
     echo "!! the root has other packages than root.lock names for $arch:" >&2
     diff <(echo "$locked") <(echo "$lines") | grep '^[<>]' | head -20 >&2 || true
-    echo "   take them with --update-lock" >&2
+    echo "   (the script installs other packages than when the lock was written?)" >&2
+    echo "   --update-lock moves to the newest Debian and writes the lock again" >&2
     exit 1
 fi
 
-# packed on the host: the tree's mkfs.erofs, owners and modes of the tar
-TREE="$(cd "$HERE/../../../.." && pwd)"
-MKFS=${MKFS_EROFS:-$(command -v mkfs.erofs || ls "$TREE"/{out,out_rb3,cuttlefish_out,raspberry_out}/host/linux-x86/bin/mkfs.erofs 2>/dev/null | head -1 || true)}
-[ -x "$MKFS" ] || { echo "!! no mkfs.erofs: m mkfs.erofs, or MKFS_EROFS=<path>" >&2; exit 1; }
+# packed on the host: the tree's mkfs.erofs (it reads a tar), owners and modes of the tar
+MKFS=${MKFS_EROFS:-${ANDROID_HOST_OUT:+$ANDROID_HOST_OUT/bin/mkfs.erofs}}
+[ -x "$MKFS" ] || MKFS=$(command -v mkfs.erofs || true)
+[ -x "$MKFS" ] || { echo "!! no mkfs.erofs: m mkfs.erofs in a shell set up for the tree, or MKFS_EROFS=<path>" >&2; exit 1; }
 tar="$CACHE/browser-root-$arch.tar"
 echo "copying the root to $tar"
 # a file and adb pull: a stream through adb exec-out is about a hundred times slower

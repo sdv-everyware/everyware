@@ -13,7 +13,7 @@
 RUN=/data/vendor/everyware/run
 # The Debian root: the image's, read-only (the APEX com.everyware.browser, mounted by its rc),
 # with the browser's home from /data. Never a root on /data: this service runs as root, and
-# what it runs must be verified (a root written to /data once would run at every boot).
+# what it runs must come from the image (a root written to /data once would run at every boot).
 R=/mnt/vendor/everyware_browser
 ENTER=/vendor/bin/glibc-enter.sh
 # the helper scripts of the image, as the root sees them (glibc-enter.sh binds the directory)
