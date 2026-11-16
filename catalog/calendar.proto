@@ -34,8 +34,11 @@ message Agenda {
     string setup_url = 2 [(.sdv.vsidl.v1.variable_type_max_size) = 256];
     // The calendar's title (for the primary calendar Google uses the account's address).
     string calendar = 3 [(.sdv.vsidl.v1.variable_type_max_size) = 64];
-    // The events from now to seven days ahead, sorted by start; an event that has begun and not
-    // ended is among them. Empty unless link is CALENDAR_CONNECTED.
+    // The events from now to seven days ahead; an event that has begun and not ended is among
+    // them, an invitation the account declined is not. In Google's order: by start in the
+    // calendar's time zone, an all-day event at the start of its day there. Keep this order: an
+    // all-day event's start (00:00 UTC) is not the start of its day in every zone, so sorting by
+    // start puts it in the wrong place west of UTC. Empty unless link is CALENDAR_CONNECTED.
     repeated AgendaEvent events = 4 [(.sdv.vsidl.v1.repeated_field_max_count) = 40];
     // Unix time of the last successful read of the calendar; 0 for none.
     int64 updated = 5;

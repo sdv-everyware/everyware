@@ -46,10 +46,12 @@ panel; the relay page sees the code, which is useless without the verifier.
 
 | | |
 |---|---|
-| topic `agenda` (`Agenda`) | the link (`CALENDAR_NO_CLIENT`, `CALENDAR_NOT_CONNECTED`, `CALENDAR_CONNECTED`, `CALENDAR_EXPIRED`), the setup URL while there is no account, the calendar's title, up to 40 events sorted by start, the time of the last read |
+| topic `agenda` (`Agenda`) | the link (`CALENDAR_NO_CLIENT`, `CALENDAR_NOT_CONNECTED`, `CALENDAR_CONNECTED`, `CALENDAR_EXPIRED`), the setup URL while there is no account, the calendar's title, up to 40 events in Google's order, the time of the last read |
 | an event (`AgendaEvent`) | Google's id, title, place, start and end (unix seconds; an all-day event at 00:00 UTC, the end exclusive), all day or not, the event's own colour from Google's event palette (0: none, the screen's default) |
 | a private or confidential event | the title "Busy", no place |
 | a recurring event | each occurrence of the seven days is an event (`singleEvents=true`) |
+| a cancelled event, an invitation the account declined | not in the agenda (`fields` asks for the account's own answer only: `attendees(self,responseStatus)`, `maxAttendees=1`) |
+| the order | Google's (`orderBy=startTime`): by start in the calendar's time zone, an all-day event at the start of its day there. The bundle does not sort again: an all-day event's 00:00 UTC is 19:00 the day before in New York, so sorted by it Tuesday's holiday would come before Monday's dinner |
 | `oauth-client.json` | the owner's OAuth client, Google's downloaded JSON; put there by `scripts/calendar-client.sh`; never in git or in the image |
 | `grant.json` | the client's id and the refresh token, mode 0600 |
 | `agenda.pb` | the last agenda, published again at the next start |
@@ -175,7 +177,7 @@ state, so the relay page sends the phone back to the same one.
 - `everyware_calendar_client_test` (host): the client JSON, PKCE with RFC 7636's vector, the
   authorization URL, the state there and back, nonces once and in time, the setup token, the
   token endpoint's answers (`invalid_grant`), Events:list as the agenda (timed, all day, private,
-  cancelled, recurring, missing fields, long text), the setup page's requests, the address from
+  cancelled, declined, recurring, missing fields, long text, Google's order kept), the setup page's requests, the address from
   `/proc/net`. `everyware_bundle_store_test`: the private file.
 - The relay page: `node vendor/sdv-everyware/everyware/pages/test/oauth.test.js`.
 - On the board: `adb logcat -s calendar_bundle` ("no OAuth client", "the setup page: open on

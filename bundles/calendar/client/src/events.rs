@@ -1,6 +1,7 @@
 //! The Calendar API's Events:list of the primary calendar, read for the agenda: the next seven
-//! days, recurring events as their occurrences, sorted by start, with only the fields the agenda
-//! needs. <https://developers.google.com/workspace/calendar/api/v3/reference/events/list>
+//! days, recurring events as their occurrences, in Google's order (by start in the calendar's
+//! time zone), with only the fields the agenda needs, without the invitations the owner declined.
+//! <https://developers.google.com/workspace/calendar/api/v3/reference/events/list>
 
 use crate::time::{self, DAY};
 use everyware_catalog::calendar::AgendaEvent;
@@ -12,8 +13,9 @@ pub const EVENTS_URL: &str = "https://www.googleapis.com/calendar/v3/calendars/p
 pub const DAYS: i64 = 7;
 /// The events of an agenda, at most (the catalog's bound).
 pub const MAX_EVENTS: usize = 40;
-/// Only what the agenda needs.
-pub const FIELDS: &str = "summary,items(id,status,summary,location,visibility,colorId,start,end)";
+/// Only what the agenda needs; of the attendees only the account's own answer (with
+/// `maxAttendees=1` Google lists only the account itself).
+pub const FIELDS: &str = "summary,items(id,status,summary,location,visibility,colorId,start,end,attendees(self,responseStatus))";
 /// The title of a private or confidential event.
 pub const BUSY: &str = "Busy";
 /// The catalog's bounds (catalog/calendar.proto), in bytes.
@@ -32,7 +34,7 @@ const EVENT_COLORS: [u32; 11] = [0xa4bdfc, 0x7ae7bf, 0xdbadff, 0xff887c, 0xfbd75
 pub struct Read {
     /// The calendar's title (Events:list `summary`).
     pub calendar: String,
-    /// Its events from now on, sorted by start, at most `MAX_EVENTS`.
+    /// Its events from now on, in Google's order, at most `MAX_EVENTS`.
     pub events: Vec<AgendaEvent>,
 }
 
@@ -62,6 +64,7 @@ pub fn events_url(now: i64) -> String {
         .append_pair("singleEvents", "true")
         .append_pair("orderBy", "startTime")
         .append_pair("maxResults", &MAX_EVENTS.to_string())
+        .append_pair("maxAttendees", "1")
         .append_pair("fields", FIELDS)
         .finish();
     format!("{EVENTS_URL}?{query}")
@@ -83,9 +86,13 @@ fn api_message(body: &[u8]) -> String {
     text(v["error"]["message"].as_str().unwrap_or(""), 160)
 }
 
-/// An Events:list answer as the agenda's events: cancelled ones left out, a private or
-/// confidential one as "Busy" without its place, an all-day one with its dates at 00:00 UTC, an
-/// event without a start left out; sorted by start, at most `MAX_EVENTS`.
+/// An Events:list answer as the agenda's events: cancelled ones and the invitations the account
+/// declined left out, a private or confidential one as "Busy" without its place, an all-day one
+/// with its dates at 00:00 UTC, an event without a start left out; at most `MAX_EVENTS`.
+///
+/// The order is Google's (`orderBy=startTime`: by start in the calendar's time zone, an all-day
+/// event at the start of its day there). It is not sorted again here: an all-day event's 00:00 UTC
+/// is not the start of its day on the panel (in New York it is 19:00 the day before).
 pub fn parse_events(json: &str) -> Result<Read, String> {
     let v: Value = serde_json::from_str(json).map_err(|e| format!("Events:list: not JSON: {e}"))?;
     let items = match v.get("items") {
@@ -94,14 +101,13 @@ pub fn parse_events(json: &str) -> Result<Read, String> {
         Some(_) => return Err("Events:list: items is not a list".into()),
     };
     let mut events: Vec<AgendaEvent> = items.iter().filter_map(event).collect();
-    events.sort_by_key(|e| (e.start, e.end));
     events.truncate(MAX_EVENTS);
     Ok(Read { calendar: text(v["summary"].as_str().unwrap_or(""), MAX_CALENDAR), events })
 }
 
 /// One item of the list, or None for one the agenda does not show.
 fn event(item: &Value) -> Option<AgendaEvent> {
-    if item["status"] == "cancelled" {
+    if item["status"] == "cancelled" || declined(item) {
         return None;
     }
     let (start, all_day) = when(&item["start"])?;
@@ -120,6 +126,11 @@ fn event(item: &Value) -> Option<AgendaEvent> {
     e.all_day = all_day;
     e.color = item["colorId"].as_str().and_then(|c| c.parse::<usize>().ok()).and_then(|c| EVENT_COLORS.get(c.wrapping_sub(1))).copied().unwrap_or(0);
     Some(e)
+}
+
+/// The account declined the invitation (its own attendee entry says so).
+fn declined(item: &Value) -> bool {
+    item["attendees"].as_array().is_some_and(|all| all.iter().any(|a| a["self"] == true && a["responseStatus"] == "declined"))
 }
 
 /// A start or an end: `{"date": "2026-11-16"}` (all day, 00:00 UTC) or `{"dateTime": RFC 3339}`.
@@ -161,26 +172,32 @@ mod tests {
         assert_eq!(q["timeMin"], "2026-11-16T09:30:00Z");
         assert_eq!(q["timeMax"], "2026-11-23T09:30:00Z");
         assert_eq!((q["singleEvents"].as_str(), q["orderBy"].as_str(), q["maxResults"].as_str()), ("true", "startTime", "40"));
+        assert_eq!(q["maxAttendees"], "1");
         assert_eq!(q["fields"], FIELDS);
     }
 
+    // in Google's order (orderBy=startTime, the calendar in Europe/Berlin)
     const LIST: &str = r#"{
       "summary": "anna@example.org",
       "items": [
+        {"id": "weekly_20261116T080000Z", "recurringEventId": "weekly", "summary": "Stand-up", "colorId": "7",
+         "start": {"dateTime": "2026-11-16T09:00:00+01:00"}, "end": {"dateTime": "2026-11-16T09:15:00+01:00"}},
+        {"id": "gone", "status": "cancelled", "summary": "Cancelled", "start": {"dateTime": "2026-11-16T10:00:00Z"}, "end": {"dateTime": "2026-11-16T11:00:00Z"}},
+        {"id": "secret", "summary": "Interview at Rival Inc", "location": "Rival HQ", "visibility": "private",
+         "start": {"dateTime": "2026-11-16T12:00:00Z"}, "end": {"dateTime": "2026-11-16T13:00:00Z"}},
+        {"id": "spam", "summary": "Win a prize", "location": "spam.example", "attendees": [{"self": true, "responseStatus": "declined"}],
+         "start": {"dateTime": "2026-11-16T13:00:00Z"}, "end": {"dateTime": "2026-11-16T14:00:00Z"}},
+        {"id": "conf", "summary": "Doctor", "visibility": "confidential", "attendees": [{"self": true, "responseStatus": "accepted"}],
+         "start": {"dateTime": "2026-11-16T14:00:00Z"}, "end": {"dateTime": "2026-11-16T14:30:00Z"}},
+        {"id": "maybe", "summary": "Party", "attendees": [{"self": true, "responseStatus": "needsAction"}, {"email": "b@example.org", "responseStatus": "declined"}],
+         "start": {"dateTime": "2026-11-16T19:00:00Z"}, "end": {"dateTime": "2026-11-16T23:00:00Z"}},
+        {"id": "bare", "start": {"dateTime": "2026-11-16T20:00:00Z"}},
+        {"id": "nostart", "summary": "No start", "end": {"date": "2026-11-16"}},
+        {"id": "badstart", "summary": "Bad", "start": {"dateTime": "tomorrow"}},
         {"id": "late", "status": "confirmed", "summary": "Dentist", "location": "Main St 1\nBerlin",
          "colorId": "11", "start": {"dateTime": "2026-11-17T15:00:00+01:00", "timeZone": "Europe/Berlin"},
          "end": {"dateTime": "2026-11-17T16:00:00+01:00"}},
         {"id": "allday", "summary": "Holiday", "start": {"date": "2026-11-18"}, "end": {"date": "2026-11-20"}},
-        {"id": "secret", "summary": "Interview at Rival Inc", "location": "Rival HQ", "visibility": "private",
-         "start": {"dateTime": "2026-11-16T12:00:00Z"}, "end": {"dateTime": "2026-11-16T13:00:00Z"}},
-        {"id": "conf", "summary": "Doctor", "visibility": "confidential",
-         "start": {"dateTime": "2026-11-16T14:00:00Z"}, "end": {"dateTime": "2026-11-16T14:30:00Z"}},
-        {"id": "gone", "status": "cancelled", "summary": "Cancelled", "start": {"dateTime": "2026-11-16T10:00:00Z"}, "end": {"dateTime": "2026-11-16T11:00:00Z"}},
-        {"id": "weekly_20261116T080000Z", "recurringEventId": "weekly", "summary": "Stand-up", "colorId": "7",
-         "start": {"dateTime": "2026-11-16T09:00:00+01:00"}, "end": {"dateTime": "2026-11-16T09:15:00+01:00"}},
-        {"id": "bare", "start": {"dateTime": "2026-11-16T20:00:00Z"}},
-        {"id": "nostart", "summary": "No start", "end": {"date": "2026-11-16"}},
-        {"id": "badstart", "summary": "Bad", "start": {"dateTime": "tomorrow"}},
         {"id": "oddcolor", "summary": "Odd colour", "colorId": "12", "start": {"date": "2026-11-21"}}
       ]
     }"#;
@@ -190,8 +207,8 @@ mod tests {
         let read = parse_events(LIST).unwrap();
         assert_eq!(read.calendar, "anna@example.org");
         let ids: Vec<&str> = read.events.iter().map(|e| e.id.as_str()).collect();
-        // sorted by start; cancelled, without a start, with a start that does not parse: left out
-        assert_eq!(ids, ["weekly_20261116T080000Z", "secret", "conf", "bare", "late", "allday", "oddcolor"]);
+        // Google's order; cancelled, declined, without a start, with a start that does not parse: left out
+        assert_eq!(ids, ["weekly_20261116T080000Z", "secret", "conf", "maybe", "bare", "late", "allday", "oddcolor"]);
         let e = |id: &str| read.events.iter().find(|e| e.id == id).unwrap();
 
         let timed = e("late");
@@ -207,6 +224,8 @@ mod tests {
         for id in ["secret", "conf"] {
             assert_eq!((e(id).title.as_str(), e(id).location.as_str()), (BUSY, ""), "{id}");
         }
+        // an invitation not answered yet stays; another guest's answer does not count
+        assert_eq!(e("maybe").title, "Party");
 
         // one occurrence of a recurring event, as Google lists it with singleEvents
         let recurring = e("weekly_20261116T080000Z");
@@ -218,6 +237,19 @@ mod tests {
         // an all-day event without its end lasts its day; an unknown colour is none
         let odd = e("oddcolor");
         assert_eq!((odd.end - odd.start, odd.color), (DAY, 0));
+    }
+
+    #[test]
+    fn all_day_events_keep_googles_place() {
+        // a calendar in New York (UTC-5): Monday's dinner at 20:00 local, then Tuesday all day.
+        // At 00:00 UTC Tuesday's date is 19:00 Monday in New York: sorted by that, it would come first.
+        let list = r#"{"items": [
+            {"id": "dinner", "start": {"dateTime": "2026-11-16T20:00:00-05:00"}, "end": {"dateTime": "2026-11-16T22:00:00-05:00"}},
+            {"id": "tuesday", "start": {"date": "2026-11-17"}, "end": {"date": "2026-11-18"}}
+        ]}"#;
+        let read = parse_events(list).unwrap();
+        assert!(read.events[1].start < read.events[0].start, "the UTC dates would sort the other way");
+        assert_eq!(read.events.iter().map(|e| e.id.as_str()).collect::<Vec<_>>(), ["dinner", "tuesday"]);
     }
 
     #[test]
