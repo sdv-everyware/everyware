@@ -22,6 +22,7 @@ repositories of the project.
 |---|---|---|
 | the browser's root as a part of the image | the experimental browser without setting up a root by hand | the root built from pinned packages, as an image file the build copies |
 | the camera feed in its zone | the camera tile | a client that draws the stream into `#zone/camera` |
+| the agenda from Google Calendar on the board | the agenda in the right column | the relay page hosted, the owner's OAuth client on the board, a run on the RB3 (`bundles/calendar`, built and host-tested) |
 | SELinux enforcing | product quality | the denials of the permissive runs |
 | automatic discovery of new devices | a real house | instead of the static peer list; options in [open points](open-points.md) |
 
