@@ -43,7 +43,12 @@ pub struct Read {
 pub enum ApiError {
     /// 401: the access token is no longer good (refresh it and try again).
     Unauthorized,
-    /// Anything else: try again later.
+    /// 403, the Calendar API is turned off in the OAuth client's project (`accessNotConfigured`,
+    /// `SERVICE_DISABLED`): it stays so until the owner turns it on.
+    Disabled(String),
+    /// 403, the access token does not carry the calendar scope: the account has to be linked again.
+    Scope(String),
+    /// Anything else (a quota, the network, Google): try again later.
     Other(String),
 }
 
@@ -51,6 +56,8 @@ impl std::fmt::Display for ApiError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             ApiError::Unauthorized => f.write_str("the access token was refused"),
+            ApiError::Disabled(why) => write!(f, "the Calendar API is turned off in the client's project ({why})"),
+            ApiError::Scope(why) => write!(f, "the access token lacks the calendar scope ({why})"),
             ApiError::Other(why) => f.write_str(why),
         }
     }
@@ -75,15 +82,29 @@ pub async fn read(token: &str, now: i64) -> Result<Read, ApiError> {
     let reply = everyware_https::get_bearer(&events_url(now), token, MAX_REPLY).await.map_err(|e| ApiError::Other(e.to_string()))?;
     match reply.status {
         200 => parse_events(&String::from_utf8_lossy(&reply.body)).map_err(ApiError::Other),
-        401 => Err(ApiError::Unauthorized),
-        status => Err(ApiError::Other(format!("Events:list: HTTP {status} {}", api_message(&reply.body)))),
+        status => Err(api_error(status, &reply.body)),
     }
 }
 
-/// The message of an API error (`{"error": {"message": ...}}`), short.
-fn api_message(body: &[u8]) -> String {
+/// An answer of the API that is not a success, by its status and its error's reasons
+/// (`{"error": {"message", "errors": [{"reason"}], "details": [{"reason"}]}}`).
+pub fn api_error(status: u16, body: &[u8]) -> ApiError {
     let v: Value = serde_json::from_slice(body).unwrap_or_default();
-    text(v["error"]["message"].as_str().unwrap_or(""), 160)
+    let error = &v["error"];
+    let message = format!("Events:list: HTTP {status} {}", text(error["message"].as_str().unwrap_or(""), 160));
+    let reasons: Vec<&str> = ["errors", "details"]
+        .iter()
+        .filter_map(|key| error[*key].as_array())
+        .flatten()
+        .filter_map(|e| e["reason"].as_str())
+        .collect();
+    let has = |names: &[&str]| reasons.iter().any(|r| names.contains(r));
+    match status {
+        401 => ApiError::Unauthorized,
+        403 if has(&["accessNotConfigured", "SERVICE_DISABLED"]) => ApiError::Disabled(message),
+        403 if has(&["insufficientPermissions", "ACCESS_TOKEN_SCOPE_INSUFFICIENT"]) => ApiError::Scope(message),
+        _ => ApiError::Other(message),
+    }
 }
 
 /// An Events:list answer as the agenda's events: cancelled ones and the invitations the account
@@ -262,6 +283,22 @@ mod tests {
         let items: Vec<String> = (0..50).map(|i| format!(r#"{{"id":"e{i}","start":{{"dateTime":"2026-11-16T{:02}:{:02}:00Z"}}}}"#, i / 60, i % 60)).collect();
         let many = parse_events(&format!(r#"{{"items":[{}]}}"#, items.join(","))).unwrap();
         assert_eq!((many.events.len(), many.events[39].id.as_str()), (MAX_EVENTS, "e39"));
+    }
+
+    #[test]
+    fn api_errors() {
+        assert_eq!(api_error(401, br#"{"error":{"code":401,"message":"Request had invalid authentication credentials."}}"#), ApiError::Unauthorized);
+        // the Calendar API turned off in the client's project: final until the owner turns it on
+        let off = br#"{"error":{"code":403,"message":"Google Calendar API has not been used in project 1 before or it is disabled.",
+            "errors":[{"message":"...","domain":"usageLimits","reason":"accessNotConfigured"}],"status":"PERMISSION_DENIED",
+            "details":[{"@type":"type.googleapis.com/google.rpc.ErrorInfo","reason":"SERVICE_DISABLED"}]}}"#;
+        assert!(matches!(api_error(403, off), ApiError::Disabled(m) if m.contains("has not been used")));
+        assert!(matches!(api_error(403, br#"{"error":{"details":[{"reason":"SERVICE_DISABLED"}]}}"#), ApiError::Disabled(_)));
+        assert!(matches!(api_error(403, br#"{"error":{"errors":[{"reason":"insufficientPermissions"}]}}"#), ApiError::Scope(_)));
+        // a quota is not final
+        assert!(matches!(api_error(403, br#"{"error":{"errors":[{"reason":"rateLimitExceeded"}]}}"#), ApiError::Other(_)));
+        assert!(matches!(api_error(500, b"<html>"), ApiError::Other(_)));
+        assert!(matches!(api_error(404, b""), ApiError::Other(_)));
     }
 
     #[test]

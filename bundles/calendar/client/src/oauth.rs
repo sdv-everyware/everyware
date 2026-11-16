@@ -242,7 +242,11 @@ pub enum AuthError {
     Grant(String),
     /// The user did not grant `SCOPE` (Google's consent screen lets one uncheck it).
     Scope,
-    /// Anything else (the client, the network, Google): try again later.
+    /// Google refused the OAuth client (`invalid_client`, `unauthorized_client`, `deleted_client`:
+    /// the client was deleted, or its secret was reset): it stays refused, a new client file is
+    /// needed.
+    Client(String),
+    /// Anything else (the network, Google): try again later.
     Other(String),
 }
 
@@ -251,6 +255,7 @@ impl fmt::Display for AuthError {
         match self {
             AuthError::Grant(why) => write!(f, "the grant is not good ({why})"),
             AuthError::Scope => write!(f, "the calendar permission was not granted"),
+            AuthError::Client(why) => write!(f, "Google refused the OAuth client ({why})"),
             AuthError::Other(why) => f.write_str(why),
         }
     }
@@ -262,7 +267,11 @@ pub fn parse_token_response(status: u16, body: &str) -> Result<Tokens, AuthError
     if let Some(error) = v.get("error").and_then(Value::as_str) {
         let description = v.get("error_description").and_then(Value::as_str).unwrap_or("");
         let why = if description.is_empty() { error.to_string() } else { format!("{error}: {description}") };
-        return Err(if error == "invalid_grant" { AuthError::Grant(why) } else { AuthError::Other(why) });
+        return Err(match error {
+            "invalid_grant" => AuthError::Grant(why),
+            "invalid_client" | "unauthorized_client" | "deleted_client" => AuthError::Client(why),
+            _ => AuthError::Other(why),
+        });
     }
     if !(200..300).contains(&status) {
         return Err(AuthError::Other(format!("token endpoint: HTTP {status}")));
@@ -480,7 +489,11 @@ mod tests {
             parse_token_response(400, r#"{"error":"invalid_grant","error_description":"Token has been expired or revoked."}"#),
             Err(AuthError::Grant("invalid_grant: Token has been expired or revoked.".into()))
         );
-        assert!(matches!(parse_token_response(401, r#"{"error":"invalid_client","error_description":"Unauthorized"}"#), Err(AuthError::Other(_))));
+        // the client deleted or its secret reset: refused until a new client file
+        assert_eq!(parse_token_response(401, r#"{"error":"invalid_client","error_description":"Unauthorized"}"#), Err(AuthError::Client("invalid_client: Unauthorized".into())));
+        assert!(matches!(parse_token_response(400, r#"{"error":"unauthorized_client"}"#), Err(AuthError::Client(_))));
+        assert!(matches!(parse_token_response(401, r#"{"error":"deleted_client","error_description":"The OAuth client was deleted."}"#), Err(AuthError::Client(_))));
+        assert!(matches!(parse_token_response(400, r#"{"error":"invalid_request"}"#), Err(AuthError::Other(_))));
         assert_eq!(parse_token_response(200, r#"{"access_token":"a","expires_in":1,"scope":"openid email"}"#), Err(AuthError::Scope));
         assert!(matches!(parse_token_response(502, "<html>Bad Gateway</html>"), Err(AuthError::Other(_))));
         assert!(matches!(parse_token_response(500, "{}"), Err(AuthError::Other(_))));

@@ -9,8 +9,10 @@ import "sdv/vsidl/v1/annotations.proto";
 
 // The link between the panel and a Google account.
 enum CalendarLink {
-    // No OAuth client is configured on the panel (oauth-client.json in the bundle's directory,
-    // bundles/calendar/README.md): nothing to set up from the screen.
+    // No usable OAuth client on the panel: none configured (oauth-client.json in the bundle's
+    // directory, bundles/calendar/README.md), or Google refused it (the client deleted, its secret
+    // reset, the Calendar API turned off in its project). Nothing to set up from the screen; no
+    // events, also none from before.
     CALENDAR_NO_CLIENT = 0;
     // No account is linked: setup_url is the page that links one.
     CALENDAR_NOT_CONNECTED = 1;
@@ -40,7 +42,9 @@ message Agenda {
     // all-day event's start (00:00 UTC) is not the start of its day in every zone, so sorting by
     // start puts it in the wrong place west of UTC. Empty unless link is CALENDAR_CONNECTED.
     repeated AgendaEvent events = 4 [(.sdv.vsidl.v1.repeated_field_max_count) = 40];
-    // Unix time of the last successful read of the calendar; 0 for none.
+    // Unix time of the last successful read of the calendar; 0 for none. With CALENDAR_CONNECTED, 0
+    // means not read yet: the events are unknown, not none. A read that fails (no network, Google
+    // busy) keeps the last agenda as it was; updated tells how old it is.
     int64 updated = 5;
 }
 

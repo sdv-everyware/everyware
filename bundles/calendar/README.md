@@ -55,7 +55,7 @@ panel; the relay page sees the code, which is useless without the verifier.
 | the order | Google's (`orderBy=startTime`): by start in the calendar's time zone, an all-day event at the start of its day there. The bundle does not sort again: an all-day event's 00:00 UTC is 19:00 the day before in New York, so sorted by it Tuesday's holiday would come before Monday's dinner |
 | `oauth-client.json` | the owner's OAuth client, Google's downloaded JSON; put there by `scripts/calendar-client.sh`; never in git or in the image |
 | `grant.json` | the client's id and the refresh token, mode 0600 |
-| `agenda.pb` | the last agenda, published again at the next start |
+| `agenda.pb` | the last agenda, mode 0600 (titles, places, the account's address), published again at the next start |
 
 The colour of the calendar itself is not in the agenda: it needs the scope
 `calendar.calendarlist.readonly`, which the panel does not ask for. An event without a colour
@@ -80,7 +80,22 @@ ANDROID_SERIAL=<serial> vendor/sdv-everyware/everyware/scripts/calendar-client.s
 
 The script needs adb as root. A bundle without a client finds the file within 10 s; one with
 a client is restarted. A missing or broken file publishes `CALENDAR_NO_CLIENT` (the log says
-why).
+why), and so does a client Google refuses (next section).
+
+## When Google says no
+
+| Google's answer | The bundle's directory | The agenda |
+|---|---|---|
+| a read | `agenda.pb` | `CALENDAR_CONNECTED` with the events and `updated` |
+| `invalid_grant` (the access revoked or ended), the calendar scope gone | `grant.json` removed | `CALENDAR_EXPIRED` without events, the setup page again; still expired after a restart |
+| `invalid_client`, `unauthorized_client`, `deleted_client` (the client deleted, its secret reset); the Calendar API turned off in the client's project (403 `accessNotConfigured`, `SERVICE_DISABLED`) | `grant.json` kept: a reset secret keeps the client's id, and the grant with it | `CALENDAR_NO_CLIENT` without events, not tried again until `oauth-client.json` changes (or the bundle restarts) |
+| anything else (no network, a quota, Google busy) | | the last agenda stays; `updated` tells its age; tried again after 2 s, then twice as long each time up to 5 minutes |
+
+A refused client is not tried every five minutes: the owner fixes it in the Cloud console and
+runs `calendar-client.sh` again (a new secret is a new file; after turning the API on, the same
+file again restarts the bundle). The events of before are dropped, so the screen does not show an
+old week as current. While the reads only fail for a while, the screen can tell an old agenda
+by `updated`; `updated` 0 with `CALENDAR_CONNECTED` means not read yet, not an empty week.
 
 ## Development without the relay page
 
@@ -109,15 +124,20 @@ its own script only, by hash, and no referrer leaves it. Where it is hosted is n
 ## How it is built
 
 - `src/lib.rs`: the shape `vsidlc --services` generates (`ServiceBundle`, `SdvComms`, a
-  current-thread runtime, `sdv_main` with the publisher). `handle_agenda_publisher` goes
-  through the states: no client (look for the file every 10 s), no account (`run_setup`: the
-  setup page), an account (`read_agenda`), and back to the setup page when Google says the
-  grant is not good any more (`invalid_grant`: revoked or ended).
-- `client/` (`libeveryware_calendar_client`, host test `everyware_calendar_client_test`): the
-  OAuth client file, PKCE, the authorization URL, the state, the nonces and the setup token,
-  the token endpoint's answers (`oauth.rs`); the setup page's requests and answers
-  (`setup.rs`); Events:list as the agenda (`events.rs`); RFC 3339 times (`time.rs`); the panel's
-  address (`net.rs`).
+  current-thread runtime, `sdv_main` with the publisher). It only loops, sleeps and publishes:
+  `handle_agenda_publisher` goes through the states (no client, no account with `run_setup`, an
+  account with `read_agenda`, and back as the table above says).
+- `client/` (`libeveryware_calendar_client`, host test `everyware_calendar_client_test`), every
+  decision with its test:
+  - `link.rs`: one read (`Session`: the access token renewed before it ends and once more after a
+    401, a new refresh token kept at once) and what each outcome leaves and publishes (`Link`).
+  - `server.rs`: the setup page's connections (the head bounded and read in time, the
+    connections capped, the code exchanged, how the setup ends).
+  - `google.rs`: Google as a trait; the bundle uses HTTPS, the tests a script.
+  - `oauth.rs`: the client file, PKCE, the authorization URL, the state, the nonces and the
+    setup token, the token endpoint's answers. `setup.rs`: the setup page's requests and
+    answers. `events.rs`: Events:list as the agenda, the API's errors. `time.rs`: RFC 3339.
+    `net.rs`: the panel's address.
 - `libs/https`: `post_form` for the token endpoint, `get_bearer` for the Calendar API.
 - `libs/bundle-store`: the grant (`save_private`, 0600, written to a temporary file and
   renamed), the last agenda, the client file.
@@ -133,6 +153,7 @@ its own script only, by hash, and no referrer leaves it. Where it is hosted is n
 | while there is no account | the setup URL; a new one after every use, every ten minutes and when the panel's address changes (read every 10 s) |
 | right after the link, then every 5 minutes | the agenda |
 | a read that fails | the last agenda stays; tried again after 2 s, then twice as long each time up to 5 minutes (the network comes some seconds after the bundle at boot) |
+| Google refuses the client | `CALENDAR_NO_CLIENT` without events, until the client file changes |
 
 The access token (an hour) is renewed two minutes before it ends, and when the API refuses it.
 
@@ -177,11 +198,21 @@ state, so the relay page sends the phone back to the same one.
 
 ## Testing
 
-- `everyware_calendar_client_test` (host): the client JSON, PKCE with RFC 7636's vector, the
-  authorization URL, the state there and back, nonces once and in time, the setup token, the
-  token endpoint's answers (`invalid_grant`), Events:list as the agenda (timed, all day, private,
-  cancelled, declined, recurring, missing fields, long text, Google's order kept), the setup page's requests, the address from
-  `/proc/net`. `everyware_bundle_store_test`: the private file.
+- `everyware_calendar_client_test` (host):
+  - the link: a 401 gives one refresh and one more read, the access token renewed before it
+    ends, a new refresh token kept at once (0600), `invalid_grant` and a lost scope end in
+    `CALENDAR_EXPIRED` (also after a restart), a refused client and the Calendar API turned off
+    end in `CALENDAR_NO_CLIENT` without events until the client file changes, the network tried
+    again, the last agenda at a start (a day old at most), a grant of another client not taken;
+  - the setup page's connections: from the QR code to the grant (the address the phone reached
+    in the state, the exchange with the verifier of the challenge), a token used once, a refused
+    client ends the setup, the head bounded to 4 kB, a slow request closed without an answer, a
+    connection over the limit closed at once (on loopback sockets);
+  - the client JSON, PKCE with RFC 7636's vector, the authorization URL, the state there and
+    back, nonces once and in time, the setup token, the token endpoint's answers and the API's
+    errors, Events:list as the agenda (timed, all day, private, cancelled, declined, recurring,
+    missing fields, long text, Google's order kept), the setup page's requests, the address from
+    `/proc/net`. `everyware_bundle_store_test`: the private file.
 - The relay page: `node vendor/sdv-everyware/everyware/pages/test/oauth.test.js`.
 - On the board: `adb logcat -s calendar_bundle` ("no OAuth client", "the setup page: open on
   192.168.1.23:8765", "the setup page: a link begins", "the account is linked", "12 events in

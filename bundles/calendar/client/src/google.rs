@@ -1,0 +1,46 @@
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//      http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+//! What the calendar asks Google, as a trait: the bundle uses `Live` (HTTPS to Google), the
+//! tests a fake that answers from a script.
+
+use crate::events::{self, ApiError, Read};
+use crate::oauth::{self, AuthError, ClientConfig, Tokens};
+
+/// Google's token endpoint and Calendar API.
+#[async_trait::async_trait]
+pub trait Google: Send + Sync {
+    /// The code of a flow exchanged for tokens.
+    async fn exchange(&self, client: &ClientConfig, code: &str, verifier: &str) -> Result<Tokens, AuthError>;
+    /// A new access token with a refresh token.
+    async fn refresh(&self, client: &ClientConfig, refresh_token: &str) -> Result<Tokens, AuthError>;
+    /// The primary calendar's events from `now` (unix time) on, with an access token.
+    async fn events(&self, access_token: &str, now: i64) -> Result<Read, ApiError>;
+}
+
+/// Google itself, over HTTPS (libs/https).
+pub struct Live;
+
+#[async_trait::async_trait]
+impl Google for Live {
+    async fn exchange(&self, client: &ClientConfig, code: &str, verifier: &str) -> Result<Tokens, AuthError> {
+        oauth::exchange(client, code, verifier).await
+    }
+
+    async fn refresh(&self, client: &ClientConfig, refresh_token: &str) -> Result<Tokens, AuthError> {
+        oauth::refresh(client, refresh_token).await
+    }
+
+    async fn events(&self, access_token: &str, now: i64) -> Result<Read, ApiError> {
+        events::read(access_token, now).await
+    }
+}
