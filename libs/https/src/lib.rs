@@ -1,13 +1,16 @@
-//! HTTPS for the service bundles that talk to the internet (the weather, the news): hyper over
-//! tokio-openssl over BoringSSL, the TLS stack SDV itself uses for SDV-RPC (one TLS stack per
-//! process: `bssl_sys` cannot be linked twice, so no rustls). The server's certificate is checked
-//! against the system CA store and the host name. HTTPS only, HTTP/1.1, one connection per
-//! request, redirects followed, the body limited in size and the whole request in time.
+//! HTTPS for the service bundles that talk to the internet (the weather, the news, the calendar):
+//! hyper over tokio-openssl over BoringSSL, the TLS stack SDV itself uses for SDV-RPC (one TLS
+//! stack per process: `bssl_sys` cannot be linked twice, so no rustls). The server's certificate
+//! is checked against the system CA store and the host name. HTTPS only, HTTP/1.1, one connection
+//! per request, the body limited in size and the whole request in time. `get` follows redirects
+//! and takes only a success; `post_form` and `get_bearer` (an API with OAuth) follow none and
+//! hand back any status with its body, because an API says in the body why it refused.
 
 use bytes::Bytes;
-use http_body_util::{BodyExt, Empty};
+use http_body_util::{BodyExt, Full};
+use hyper::body::Incoming;
 use hyper::client::conn::http1;
-use hyper::Request;
+use hyper::{Method, Request};
 use hyper_util::rt::TokioIo;
 use log::warn;
 use openssl::ssl::{SslConnector, SslMethod};
@@ -38,6 +41,17 @@ pub struct Response {
     pub url: String,
     /// The Content-Type header, as sent.
     pub content_type: String,
+    pub body: Vec<u8>,
+}
+
+/// The answer to a request, whatever its status.
+#[derive(Clone, Debug)]
+pub struct Reply {
+    /// The HTTP status code.
+    pub status: u16,
+    /// The Content-Type header, as sent.
+    pub content_type: String,
+    /// The body (an API's error is in it).
     pub body: Vec<u8>,
 }
 
@@ -110,6 +124,32 @@ pub async fn get_text(url: &str, max_body: usize) -> Result<String> {
     Ok(String::from_utf8_lossy(&response.body).into_owned())
 }
 
+/// POST `form` (`application/x-www-form-urlencoded`) to `url`: the answer whatever its status (an
+/// OAuth error comes as 400 with a JSON body). No redirects.
+pub async fn post_form(url: &str, form: &str, max_body: usize) -> Result<Reply> {
+    let url = Url::parse(url)?;
+    let headers = [("content-type", "application/x-www-form-urlencoded"), ("accept", "application/json")];
+    timeout(TIMEOUT, reply(&url, Method::POST, &headers, Bytes::copy_from_slice(form.as_bytes()), max_body)).await.map_err(|_| "timeout")?
+}
+
+/// GET `url` with the OAuth access token `token` (`Authorization: Bearer`): the answer whatever
+/// its status (401: the token is no longer good). No redirects.
+pub async fn get_bearer(url: &str, token: &str, max_body: usize) -> Result<Reply> {
+    let url = Url::parse(url)?;
+    let authorization = format!("Bearer {token}");
+    let headers = [("authorization", authorization.as_str()), ("accept", "application/json")];
+    timeout(TIMEOUT, reply(&url, Method::GET, &headers, Bytes::new(), max_body)).await.map_err(|_| "timeout")?
+}
+
+/// One request and its whole answer, whatever the status.
+async fn reply(url: &Url, method: Method, headers: &[(&str, &str)], body: Bytes, max_body: usize) -> Result<Reply> {
+    let response = send(url, method, headers, body).await?;
+    let status = response.status().as_u16();
+    let content_type = content_type(&response);
+    let body = read_body(response, max_body).await?;
+    Ok(Reply { status, content_type, body })
+}
+
 async fn follow(mut url: Url, max_body: usize) -> Result<Response> {
     for _ in 0..=MAX_REDIRECTS {
         match once(&url, max_body).await? {
@@ -125,8 +165,23 @@ enum Answer {
     Redirect(String),
 }
 
-/// One request on a new connection.
+/// One GET on a new connection: a redirect, else the body of a success.
 async fn once(url: &Url, max_body: usize) -> Result<Answer> {
+    let response = send(url, Method::GET, &[("accept", "*/*")], Bytes::new()).await?;
+    let status = response.status();
+    if status.is_redirection() {
+        let location = response.headers().get("location").and_then(|v| v.to_str().ok()).ok_or_else(|| format!("HTTP {status} without a location"))?;
+        return Ok(Answer::Redirect(location.to_string()));
+    }
+    if !status.is_success() {
+        return Err(format!("HTTP {status}").into());
+    }
+    let content_type = content_type(&response);
+    Ok(Answer::Done(content_type, read_body(response, max_body).await?))
+}
+
+/// One request on a new connection; the answer's head, its body still to read.
+async fn send(url: &Url, method: Method, headers: &[(&str, &str)], body: Bytes) -> Result<hyper::Response<Incoming>> {
     // The name goes through getaddrinfo(), so through dnsproxyd on a device without netd.
     let tcp = TcpStream::connect((url.host.as_str(), url.port)).await?;
     let mut builder = SslConnector::builder(SslMethod::tls_client())?;
@@ -144,21 +199,21 @@ async fn once(url: &Url, max_body: usize) -> Result<Answer> {
             log::debug!("connection: {err}");
         }
     });
-    let request = Request::get(url.path.as_str())
-        .header("host", url.host.as_str())
-        .header("user-agent", USER_AGENT)
-        .header("accept", "*/*")
-        .body(Empty::<Bytes>::new())?;
-    let response = sender.send_request(request).await?;
-    let status = response.status();
-    if status.is_redirection() {
-        let location = response.headers().get("location").and_then(|v| v.to_str().ok()).ok_or_else(|| format!("HTTP {status} without a location"))?;
-        return Ok(Answer::Redirect(location.to_string()));
+    let mut request = Request::builder().method(method).uri(url.path.as_str()).header("host", url.host.as_str()).header("user-agent", USER_AGENT);
+    for (name, value) in headers {
+        request = request.header(*name, *value);
     }
-    if !status.is_success() {
-        return Err(format!("HTTP {status}").into());
-    }
-    let content_type = response.headers().get("content-type").and_then(|v| v.to_str().ok()).unwrap_or("").to_string();
+    // an empty body sends no Content-Length on a GET, as before
+    Ok(sender.send_request(request.body(Full::new(body))?).await?)
+}
+
+/// The Content-Type header of a response, as sent.
+fn content_type(response: &hyper::Response<Incoming>) -> String {
+    response.headers().get("content-type").and_then(|v| v.to_str().ok()).unwrap_or("").to_string()
+}
+
+/// The body of a response, up to `max_body` bytes; a longer one is an error.
+async fn read_body(response: hyper::Response<Incoming>, max_body: usize) -> Result<Vec<u8>> {
     let mut body = response.into_body();
     let mut bytes = Vec::new();
     while let Some(frame) = body.frame().await {
@@ -169,7 +224,7 @@ async fn once(url: &Url, max_body: usize) -> Result<Answer> {
             bytes.extend_from_slice(&data);
         }
     }
-    Ok(Answer::Done(content_type, bytes))
+    Ok(bytes)
 }
 
 /// Adds the certificates of the Android CA store; returns how many.

@@ -1,5 +1,5 @@
 // HTTPS client of the service bundles that talk to the internet (src/lib.rs): the weather's
-// Open-Meteo client, the news bundle.
+// Open-Meteo client, the news bundle, the calendar bundle (Google's OAuth and Calendar API).
 
 package {
     default_applicable_licenses: ["Android-Apache-2.0"],
