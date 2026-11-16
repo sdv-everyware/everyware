@@ -34,7 +34,8 @@ uses the flow of a web application, with no server of its own:
 3. Google sends the phone to the client's redirect URI, the relay page, with the code and the
    state. Google takes only an https address there, and the panel has none.
 4. The relay page reads the panel's address from the state and sends the phone on to
-   `http://<panel>/callback?code=…&state=…`. It takes only an address on the local network.
+   `http://<panel>/callback?code=…&state=…`. It takes only what the panel writes there: a private
+   IPv4 address with the port 8765.
 5. The bundle checks the nonce (once, within ten minutes), exchanges the code with the verifier
    at Google's token endpoint, keeps the refresh token, closes the setup page and reads the
    calendar at once. The phone shows "Done. You can close this page."
@@ -97,9 +98,10 @@ sends the browser to `http://localhost:8765/callback`, which adb forwards to the
 ## The relay page
 
 `pages/oauth/index.html` is one static file: no external script, no request of its own, nothing
-kept. It takes `code`, `state` or `error` from its query, decodes the state, and goes on only to
-`p` with a port when `p`'s host is a private IPv4 address (10/8, 172.16/12, 192.168/16),
-127.0.0.1, localhost or a `.local` name: `location.replace("http://<p>/callback?code=…&state=…")`.
+kept. It takes `code`, `state` or `error` from its query, decodes the state, and goes on only
+when `p` is what the panel writes: a private IPv4 address (10/8, 172.16/12, 192.168/16), or
+127.0.0.1 for development, with the port 8765 (no name, no other port):
+`location.replace("http://<p>/callback?code=…&state=…")`.
 It shows a "Continue" link too, because a browser may hold back a jump from an https page to an
 address on the local network. Anything else shows the error. Its Content-Security-Policy allows
 its own script only, by hash, and no referrer leaves it. Where it is hosted is not decided yet.
@@ -156,9 +158,10 @@ state, so the relay page sends the phone back to the same one.
   in 10 s, serves 8 connections at a time, and its pages run nothing (`default-src 'none'`),
   are not cached and send no referrer. It closes a connection by dropping it: `shutdown()` is not
   among the socket permissions of the bundle's domain.
-- The relay page goes only to an address on the local network, at the path `/callback`, with the
-  code and the state. A crafted link can therefore make a browser call `/callback` of a device
-  on its own network; it cannot send the browser anywhere else.
+- The relay page goes only to a private IPv4 address or 127.0.0.1, on the port 8765, at the path
+  `/callback`, with the code and the state. A crafted link can therefore make a browser call
+  `GET /callback` on port 8765 of a host on its own network; it cannot send the browser anywhere
+  else.
 - The client secret is the owner's own client, put on the panel by adb. A secret of a web
   client is not a strong secret on a device anyway; PKCE and the state carry the proof.
 - The calendar's title and the events are untrusted text: control characters taken out, cut to

@@ -16,7 +16,8 @@
   here after the consent screen, because Google takes only an https address as the redirect
   of a web client. The page sends the browser on to the panel's setup page on the local
   network, whose address is in the OAuth state: http://<panel>/callback?code=..&state=..
-  Only a private IPv4 address, 127.0.0.1, localhost or a .local name with a port is taken.
+  Only what the panel writes there is taken: a private IPv4 address (10/8, 172.16/12,
+  192.168/16), or 127.0.0.1 for development, with the setup page's port 8765.
   The page loads nothing, keeps nothing and sends nothing anywhere else.
   The CSP's hash is the script's: pages/test/oauth.test.js checks it.
 -->
@@ -24,7 +25,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="referrer" content="no-referrer">
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'sha256-BoUc3ZtS2W+nh+Y9Fx3TQs5rBMlNUJl1c5tMoR0YoMg='">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'sha256-peA6dNvCpfHtYpOEI3d1Fdwwso1+zeKuiC9caGL+kO8='">
 <title>Calendar link</title>
 <style>
   body { font: 18px/1.5 system-ui, sans-serif; margin: 2em auto; max-width: 32em; padding: 0 1em; color: #222; background: #fff; }
@@ -34,8 +35,8 @@
 <p><a id="continue" hidden>Continue</a></p>
 <noscript><p>This page needs JavaScript to send you back to your panel.</p></noscript>
 <script>
-// The address in the state (base64url of {"p": "host:port", "n": nonce}), when it is on the
-// local network; else null.
+// The panel's address in the state (base64url of {"p": "address:8765", "n": nonce}), when it is
+// one the panel writes; else null.
 function panelOf(state) {
   if (state.length > 512) return null;
   var base64 = state.replace(/-/g, '+').replace(/_/g, '/');
@@ -44,17 +45,14 @@ function panelOf(state) {
   try { json = JSON.parse(atob(base64)); } catch (e) { return null; }
   var p = json && json.p;
   if (typeof p !== 'string') return null;
-  var m = /^([A-Za-z0-9.-]{1,253}):([0-9]{1,5})$/.exec(p);
-  if (!m) return null;
-  var host = m[1].toLowerCase(), port = Number(m[2]);
-  if (port < 1 || port > 65535 || !isLocal(host)) return null;
-  return host + ':' + port;
+  var m = /^([0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}):8765$/.exec(p);
+  if (!m || !isPanelAddress(m[1])) return null;
+  return m[1] + ':8765';
 }
 
-// localhost, 127.0.0.1, a .local name, or a private IPv4 address (10/8, 172.16/12, 192.168/16).
-function isLocal(host) {
-  if (host === 'localhost' || host === '127.0.0.1') return true;
-  if (/^([a-z0-9]([a-z0-9-]*[a-z0-9])?\.)+local$/.test(host)) return true;
+// A private IPv4 address (10/8, 172.16/12, 192.168/16), or 127.0.0.1.
+function isPanelAddress(host) {
+  if (host === '127.0.0.1') return true;
   var m = /^([0-9]{1,3})\.([0-9]{1,3})\.([0-9]{1,3})\.([0-9]{1,3})$/.exec(host);
   if (!m) return false;
   var parts = m.slice(1);
