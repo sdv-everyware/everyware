@@ -226,14 +226,14 @@ library: `vendor/sdv-everyware/ui-lib/scripts/new-app.sh <name>` copies
 
 ## Status and roadmap
 
-Built from the public tree at `android-17.0.0_r1`; the reference board boots the image, harry
+Built from AOSP `android-17.0.0_r1`; the reference board boots the image, harry
 draws with touch, the three apps run, the five bundles build, the design path works without Figma. The A/B
 update path is in the image and running; our APEXes are not updatable on their own yet and the
 image is signed with test keys. Details in [`docs/project/status.md`](docs/project/status.md) and
 [10. Updating the system](docs/concepts/10-updating-the-system.md).
 
 What comes next is tracked as [issues](https://github.com/sdv-everyware/everyware/issues), each
-with the problem it solves and the alternatives considered: the bundles in the product, the smart home panel on the public tree, the emulator
+with the problem it solves and the alternatives considered: the bundles in the product, the smart home panel on AOSP 17, the emulator
 and the Raspberry Pi as targets, a browser (experimental) and a camera feed in a zone of the screen, SELinux
 enforcing, device discovery.
 

@@ -29,10 +29,10 @@ topic `weather`, the service `Lights`. Where the other side runs is the [agents'
 The vehicle data publisher in the tree (`packages/services/display_safety/service/`) shows every
 part. The house bundles will look the same with other names.
 
-**Interface (vsidl)**: what the bundle publishes, `vehicledata/sdv_vehicledata_catalog_v1/vehicledata_system.vsidl`:
+**Interface (vsidl)**: what the bundle publishes, `service/vehicledata/sdv_vehicledata_catalog_v1/vehicledata_system.vsidl`:
 
 ```
-package: "com.google.sdv.display_safety"
+package: "com.sdv.google.display_safety"
 
 sdv_service_bundle {
     name: "HarSdvVehicleDataPublisher"
@@ -40,13 +40,15 @@ sdv_service_bundle {
         type: "VehicleSpeed"          # protobuf message
         topic: "vehicle-speed"
         topic: "max-speed"
-        capacity: 10
+        topic: "speedlimit"
+        capacity: 100
     }
+    ...
 }
 ```
 
 **APEX manifest**: where the library and the configs are,
-`product/har_sdv_service_bundle_apex/har_sdv_vehicle_data_publisher_service_bundle.manifest.textproto`:
+`service/product/har_sdv_service_bundle_apex/har_sdv_vehicle_data_publisher_service_bundle.manifest.textproto`:
 
 ```
 sdv_service_bundle_metadata {
@@ -54,7 +56,7 @@ sdv_service_bundle_metadata {
   version_number: 1
   native_library_path: "lib64/libhar_sdv_vehicle_data_publisher_service_bundle.so"
   orchestration_config_path: "etc/orch/VehicleDataServiceBundleOrchestration.textproto"
-  authorization_policy_path: "etc/permissions/har_sdv_vehicle_data_publisher_permissions.textproto"
+  authorization_policy_path: "etc/acls/har_sdv_vehicle_data_publisher_acl.textproto"
 }
 ```
 
@@ -63,21 +65,21 @@ sdv_service_bundle_metadata {
 ```
 instance: "instance-1"
 service_bundle_name: "HarSdvVehicleDataPublisher"
-package_name: "com.google.sdv.display_safety"
+package_name: "com.sdv.google.display_safety"
 state { instances_states { started: "instance-1" } }
 ```
 
-**Policy**: what a bundle may use, `permissions_configs/har_sdv_service/permissions.textproto`
+**Policy**: what a bundle may use, `acl_configs/har_sdv_service/acl.textproto`
 (the consumer side):
 
 ```
 server {                       # offers this RPC service
-  service: "com.google.sdv.display_safety.DriverUIService"
-  channel: "driver-ui-service"
+  service: "com.sdv.google.display_safety.DriverUIService"
+  channel: "com-sdv-google-display-safety-driver-ui-service"
 }
 subscriber {                   # may subscribe to these topics
-  message: "com.google.sdv.display_safety.VehicleSpeed"
-  topic: "vehicle-speed"
+  message: "com.sdv.google.display_safety.VehicleSpeed"
+  topic: "com-sdv-google-display-safety-vehicle-speed-vehicle-speed"
 }
 ```
 
@@ -131,10 +133,10 @@ keep running.
 ## What is on the device
 
 At runtime a bundle is one shared library plus three text configs, all inside an APEX. One APEX can
-carry several bundles. For example (`/apex/com.google.sdv.display_safety`):
+carry several bundles. For example (`/apex/com.sdv.google.display_safety`):
 
 ```
-/apex/com.google.sdv.display_safety/
+/apex/com.sdv.google.display_safety/
 ├── lib64/
 │   ├── libhar_sdv_vehicle_data_publisher_service_bundle.so      the code of one bundle
 │   ├── libhar_sdv_service_bundle.so                             another bundle
@@ -143,7 +145,7 @@ carry several bundles. For example (`/apex/com.google.sdv.display_safety`):
     ├── sdv_service_bundles_manifest.textproto                   every bundle of this APEX: name,
     │                                                            version, paths to its .so and configs
     ├── orch/VehicleDataServiceBundleOrchestration.textproto     which instances run
-    └── permissions/har_sdv_vehicle_data_publisher_permissions.textproto   its policy (authz)
+    └── acls/har_sdv_vehicle_data_publisher_acl.textproto        its policy (authz)
 ```
 
 | Artifact | What it is | Made from | Read by |
@@ -151,7 +153,7 @@ carry several bundles. For example (`/apex/com.google.sdv.display_safety`):
 | `lib…_service_bundle.so` | the code, mostly Rust | the bundle's source + the Rust API generated from its vsidl | `lifecycle_service_bundle_runner` (loads it) |
 | `sdv_service_bundles_manifest.textproto` | the list of bundles in this APEX | written by hand | [registry agent](2-components.md#the-sdv-agents) |
 | `etc/orch/….textproto` | instances to run | written by hand | [orchestration agent](2-components.md#the-sdv-agents) |
-| `etc/permissions/….textproto` | topics and services the bundle may use | written by hand | [the SDV agents](2-components.md#the-sdv-agents), to check every subscription and call (authz) |
+| `etc/acls/….textproto` | topics and services the bundle may use | written by hand | [the SDV agents](2-components.md#the-sdv-agents), to check every subscription and call (authz) |
 
 The vsidl is not shipped as a file: at build time it is compiled into a typed Rust API (publishers,
 subscribers, RPC clients and servers) that is linked into the `.so`.

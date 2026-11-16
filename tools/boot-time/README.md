@@ -1,7 +1,7 @@
 # Boot time to the first frame
 
 How long a device takes from power on to the first frame of its app, measured the way Google
-measures SDV (its boot time test) and HAR (its reference app waits for the first frame of its
+measures SDV (its boot time test) and HAR (its performance monitor logs the first frame of each
 document). `measure-boot.sh` reboots the device N times and prints the milestones of each boot.
 
 ```bash
@@ -26,12 +26,11 @@ flowchart LR
 | init | `ro.boottime.init` (ns since the kernel started) | Google's start: the SDV boot test counts from `init first stage started!`, not from the kernel |
 | the app's service starts | `ro.boottime.<service>` (init sets it when it starts the service) | the moment the app can start working |
 | boot completed | `VIRTUAL_DEVICE_BOOT_COMPLETED` in the kernel log (logcat's kernel buffer) | Google's stop for the SDV boot test (`platform_testing/libraries/sdv/sdv_catbox/res/config/sdv-performance-boot-time-test.xml`) |
-| first frame | the app's line `first frame of '<doc>' at <s> s since boot` | the picture on the screen: what Google's 1 to 2 s for the cluster are about |
+| first frame | the app's line `first frame of '<doc>' at <s> s since boot` | the picture on the screen |
 
 The first frame is the performance monitor's (har-monitoring): the reducer tells it the
-document, the renderer reports every frame, and `wait_for_first_frame(document)` returns at
-the first one. HAR's reference app does exactly this before it shows its next document
-(`framework/harry/src/splash.rs`). The panel waits for it the same way and logs the time from
+document, the renderer reports every frame, and the panel waits for the first one of its
+document. The panel logs the time from
 `CLOCK_BOOTTIME`, the clock of `ro.boottime.*` (the kernel log's clock differs from it only
 after a suspend, which a boot does not have)
 (`utils/smarthome-app/src/main.rs`, `clock.rs`).
