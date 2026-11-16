@@ -36,7 +36,7 @@ enum CalendarLink {
 
 message Agenda {
     option (.sdv.vsidl.v1.publication) = {
-        // a new agenda every five minutes; the subscribers want the latest one
+        // a new agenda every minute; the subscribers want the latest one
         message_count: 2
         model: MULTI_PUB
     };

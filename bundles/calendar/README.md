@@ -16,7 +16,7 @@
 
 `CalendarServiceBundle` (APEX `com.everyware.calendar`) is the agenda of the house. It links the
 panel to a Google account the way Home Assistant does, reads the next seven days of the
-account's primary calendar every five minutes and publishes them on the topic `agenda`
+account's primary calendar every minute and publishes them on the topic `agenda`
 (`catalog/calendar.proto`, `catalog/everyware.vsidl`), together with the state of the link. The
 screen gets it through the dashboard bundle (`IScreenLink.publishAgenda`) and shows the agenda,
 or the QR code of the setup page while no account is linked.
@@ -28,7 +28,7 @@ flowchart LR
     G -- "3 302 with code and state" --> RP["relay page<br/>pages/oauth (https)"]
     RP -- "4 http://panel:8765/callback?code&state" --> SP
     SP -- "5 code + verifier" --> T["oauth2.googleapis.com/token"]
-    CB["CalendarServiceBundle"] -- "6 Events:list, every 5 min" --> API["www.googleapis.com<br/>Calendar API"]
+    CB["CalendarServiceBundle"] -- "6 Events:list, every minute" --> API["www.googleapis.com<br/>Calendar API"]
     CB -. "topic agenda" .-> DB["DashboardServiceBundle"]
     DB -- "binder: publishAgenda" --> APP["the panel"]
     CB <-- "grant.json, agenda.pb,<br/>oauth-client.json" --> ST[("/data/service_bundle_data/<br/>com.everyware.calendar/<br/>CalendarServiceBundle")]
@@ -72,6 +72,7 @@ and the client secret.
 | `oauth-client.json` | the owner's OAuth client, Google's downloaded JSON; put there by `scripts/calendar-client.sh`; never in git or in the image |
 | `grant.json` | the client's id and the refresh token, mode 0600 |
 | `agenda.pb` | the last agenda, mode 0600 (titles, places, the account's address), published again at the next start |
+| `setup-url` | while the setup page is open: its URL with the one-time token, mode 0600, for the development flow |
 
 The colour of the calendar itself is not in the agenda: it needs the scope
 `calendar.calendarlist.readonly`, which the panel does not ask for. An event without a colour
@@ -109,7 +110,7 @@ why), and so does a client Google refuses (next section).
 | `invalid_client`, `unauthorized_client`, `deleted_client` (the client deleted, its secret reset); the Calendar API turned off in the client's project (403 `accessNotConfigured`, `SERVICE_DISABLED`) | `grant.json` kept: a reset secret keeps the client's id, and the grant with it | `CALENDAR_NO_CLIENT` without events, not tried again until `oauth-client.json` changes (or the bundle restarts) |
 | anything else (no network, a quota, Google busy) | | the last agenda stays; `updated` tells its age; tried again after 2 s, then twice as long each time up to 5 minutes |
 
-A refused client is not tried every five minutes: the owner fixes it in the Cloud console and
+A refused client is not tried every minute: the owner fixes it in the Cloud console and
 runs `calendar-client.sh` again (a new secret is a new file; after turning the API on, the same
 file again restarts the bundle). The events of before are dropped, so the screen does not show an
 old week as current. While the reads only fail for a while, the screen can tell an old agenda
@@ -122,10 +123,15 @@ the whole flow through adb:
 
 ```bash
 adb forward tcp:8765 tcp:8765
-adb logcat -s calendar_bundle:D | grep "setup URL"     # http://<panel>:8765/setup?t=<token>
+adb root
+adb shell cat /data/service_bundle_data/com.everyware.calendar/CalendarServiceBundle/setup-url
+# http://<panel>:8765/setup?t=<token>
 ```
 
-Open the URL in the host's browser with `localhost:8765` in place of the panel's address. Google
+The bundle writes the setup URL to `setup-url` in its directory (mode 0600, removed once the
+setup ends), because it holds the one-time token and the bundle's debug lines do not reach
+logcat. Reading it needs adb as root (a userdebug or eng build). Open the URL in the host's
+browser with `localhost:8765` in place of the panel's address. Google
 sends the browser to `http://localhost:8765/callback`, which adb forwards to the panel.
 
 ## The relay page
@@ -169,11 +175,17 @@ its own script only, by hash, and no referrer leaves it. Where it is hosted is n
 | at its start | the last agenda with an account, when it is a day old at most; else the state of the link |
 | every 10 s while there is no client | `CALENDAR_NO_CLIENT` until the file is there |
 | while there is no account | the setup URL; a new one after every use, every ten minutes and when the panel's address changes (read every 10 s) |
-| right after the link, then every 5 minutes | the agenda |
-| a read that fails | the last agenda stays; tried again after 2 s, then twice as long each time up to 5 minutes (the network comes some seconds after the bundle at boot) |
+| right after the link, then every minute | the agenda (a new event is on the screen within a minute) |
+| a read that fails | the last agenda stays; tried again after 2 s, then twice as long each time up to 5 minutes (the network comes some seconds after the bundle at boot; an outage of Google, 429 or 5xx, is asked some 20 times an hour, not every minute) |
 | Google refuses the client | `CALENDAR_NO_CLIENT` without events, until the client file changes |
 
 The access token (an hour) is renewed two minutes before it ends, and when the API refuses it.
+
+Every read is the whole window: seven days with the `fields` filter, a few kB, 1440 reads a day,
+far below the Calendar API's quotas. Google's incremental sync (`syncToken`) does not fit: it
+cannot be combined with `timeMin`, `timeMax` and `orderBy`, so it would sync the whole calendar
+and the bundle would have to merge the changes into its own copy. `agenda.pb` is written when
+the agenda changed and otherwise once an hour, not every minute (the reads change only `updated`).
 
 ## The panel's address
 
@@ -224,8 +236,9 @@ state, so the relay page sends the phone back to the same one.
 - SELinux: `untrusted_service_bundle`. Listening on port 8765 uses the TCP rules that HAR's
   policy gives the domain (`har_sdv_service_bundle_apex/lifecycle/sepolicy`); `/proc/net` is
   readable through the same file. No rule of its own.
-- The setup URL is a debug line in the log (for the development flow). Whoever reads the log has
-  adb, and with it the bundle's files.
+- The setup URL is not in the log. For the development flow it is in `setup-url` in the
+  bundle's directory (0600, the bundle's uid, gone once the setup ends): only root reads it, and
+  root has the bundle's files anyway.
 
 ## Testing
 
@@ -234,7 +247,9 @@ state, so the relay page sends the phone back to the same one.
     ends, a new refresh token kept at once (0600), `invalid_grant` and a lost scope end in
     `CALENDAR_EXPIRED` (also after a restart), a refused client and the Calendar API turned off
     end in `CALENDAR_NO_CLIENT` without events until the client file changes, the network tried
-    again, the last agenda at a start (a day old at most), a grant of another client not taken;
+    again, the last agenda at a start (a day old at most), a grant of another client not taken,
+    a read a minute and the backoff after failures (an hour of outage is at most 20 requests), an
+    unchanged agenda not written every minute, the setup URL file (0600, removed);
   - the setup page's connections: from the QR code to the grant (the address the phone reached
     in the state, the exchange with the verifier of the challenge), a token used once, a refused
     client ends the setup, the head bounded to 4 kB, a slow request closed without an answer, a

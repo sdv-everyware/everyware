@@ -23,6 +23,9 @@
 //! | `invalid_grant`, the scope gone | `grant.json` removed | `CALENDAR_EXPIRED`, no events, the setup page again |
 //! | the client refused, the Calendar API off | `grant.json` kept (a reset secret keeps the client's id) | `CALENDAR_NO_CLIENT`, no events, until `oauth-client.json` changes |
 //! | anything else | | the last agenda stays; its `updated` tells its age |
+//!
+//! When the next read is (`Pace`): a minute after a read; after a failure 2 s, then twice as long
+//! each time up to 5 minutes, so an outage of Google or of the network is not asked every minute.
 
 use crate::events::{ApiError, Read};
 use crate::google::Google;
@@ -46,6 +49,44 @@ pub const LAST_AGENDA: &str = "agenda.pb";
 pub const LAST_MAX_AGE: Duration = Duration::from_secs(24 * 3600);
 /// An access token is renewed when it has less than this left.
 pub const REFRESH_MARGIN: Duration = Duration::from_secs(120);
+/// A read every this long while the reads succeed: a new event is on the screen within a minute.
+/// A read is the 7-day window with the `fields` filter, a few kB; 1440 a day. Google's
+/// incremental sync (`syncToken`) does not fit: it cannot be combined with timeMin, timeMax and
+/// orderBy, so it would sync the whole calendar.
+pub const POLL_INTERVAL: Duration = Duration::from_secs(60);
+/// After a failed read the next one waits this, then twice as long each time up to `RETRY_MAX`.
+pub const RETRY_FIRST: Duration = Duration::from_secs(2);
+/// The longest wait after failures (an outage of Google: 429, 5xx, or of the network).
+pub const RETRY_MAX: Duration = Duration::from_secs(300);
+/// An agenda that did not change (a read every minute changes only `updated`) is written again
+/// at most this often, to spare the flash; a changed one at once.
+pub const KEEP_EVERY: Duration = Duration::from_secs(3600);
+/// The setup URL for the development flow, in the bundle's directory (0600): the bundle's debug
+/// lines do not reach logcat, and the URL holds a one-time token. Gone once the setup ends.
+pub const SETUP_URL_FILE: &str = "setup-url";
+
+/// When the next read is: `POLL_INTERVAL` after a read; after failures `RETRY_FIRST`, then twice
+/// as long each time up to `RETRY_MAX`.
+#[derive(Debug, Default)]
+pub struct Pace {
+    /// The last wait after a failure, while the reads fail.
+    retry: Option<Duration>,
+}
+
+impl Pace {
+    /// The wait after a read that succeeded; the failures start again from `RETRY_FIRST`.
+    pub fn after_read(&mut self) -> Duration {
+        self.retry = None;
+        POLL_INTERVAL
+    }
+
+    /// The wait after a read that failed.
+    pub fn after_failure(&mut self) -> Duration {
+        let wait = self.retry.map_or(RETRY_FIRST, |last| (last * 2).min(RETRY_MAX));
+        self.retry = Some(wait);
+        wait
+    }
+}
 
 /// What a read of the agenda gave.
 #[derive(Debug, PartialEq)]
@@ -140,12 +181,14 @@ pub struct Link {
     file: Option<Vec<u8>>,
     /// The client file Google refused: no client while the file is the same.
     refused: Option<Vec<u8>>,
+    /// The connected agenda kept last, without its `updated`, and when.
+    kept: Option<(Agenda, Instant)>,
 }
 
 impl Link {
     /// The link's files in `store`.
     pub fn new(store: Arc<Store>) -> Link {
-        Link { store, file: None, refused: None }
+        Link { store, file: None, refused: None, kept: None }
     }
 
     /// The bundle's directory.
@@ -191,24 +234,39 @@ impl Link {
         agenda_of(CalendarLink::CALENDAR_CONNECTED)
     }
 
-    /// A read at `unix`: the connected agenda, kept.
-    pub fn connected(&self, read: Read, unix: i64) -> Agenda {
+    /// A read at `unix` (`now` on the monotonic clock): the connected agenda, kept when it changed
+    /// or when the last one was kept `KEEP_EVERY` ago.
+    pub fn connected(&mut self, read: Read, unix: i64, now: Instant) -> Agenda {
         let mut agenda = agenda_of(CalendarLink::CALENDAR_CONNECTED);
         agenda.calendar = read.calendar;
         agenda.events = read.events;
+        let content = agenda.clone();
         agenda.updated = unix;
-        self.keep(&agenda);
+        let same = self.kept.as_ref().is_some_and(|(kept, at)| *kept == content && now.saturating_duration_since(*at) < KEEP_EVERY);
+        if !same {
+            self.keep(&agenda);
+            self.kept = Some((content, now));
+        }
         agenda
+    }
+
+    /// The setup URL as it is now into `SETUP_URL_FILE` (0600); empty: the file removed.
+    pub fn setup_url(&self, url: &str) {
+        let written = if url.is_empty() { self.store.remove(SETUP_URL_FILE) } else { self.store.save_private(SETUP_URL_FILE, format!("{url}\n").as_bytes()) };
+        if let Err(err) = written {
+            log::warn!("{SETUP_URL_FILE}: {err}");
+        }
     }
 
     /// The grant is not good any more: forgotten, and the events with it; expired, kept (it
     /// stays expired across restarts until an account is linked).
-    pub fn revoked(&self) -> Agenda {
+    pub fn revoked(&mut self) -> Agenda {
         if let Err(err) = self.store.remove(GRANT_FILE) {
             log::error!("the grant not removed: {err}");
         }
         let agenda = agenda_of(CalendarLink::CALENDAR_EXPIRED);
         self.keep(&agenda);
+        self.kept = None;
         agenda
     }
 
@@ -219,6 +277,7 @@ impl Link {
         self.refused = self.file.clone();
         let agenda = agenda_of(CalendarLink::CALENDAR_NO_CLIENT);
         self.keep(&agenda);
+        self.kept = None;
         agenda
     }
 
@@ -360,9 +419,9 @@ mod tests {
     async fn invalid_grant_ends_in_expired() {
         let d = dir("revoked");
         let store = Arc::new(Store::at(&d));
-        let link = Link::new(store.clone());
+        let mut link = Link::new(store.clone());
         link.linked(&grant());
-        link.connected(read(3), 1_763_285_400);
+        link.connected(read(3), 1_763_285_400, Instant::now());
         let google = Script::new(vec![Err(AuthError::Grant("invalid_grant: Token has been expired or revoked.".into()))], vec![]);
         let mut session = Session::new(client(), grant(), None, Instant::now());
         assert!(matches!(session.read(&google, &store, Instant::now(), 0).await, Outcome::Revoked(why) if why.contains("invalid_grant")));
@@ -387,7 +446,7 @@ mod tests {
         let mut link = Link::new(store.clone());
         let client = link.client().unwrap();
         link.linked(&grant());
-        link.connected(read(3), 1_763_285_400);
+        link.connected(read(3), 1_763_285_400, Instant::now());
         // the secret reset in the Cloud console
         let google = Script::new(vec![Err(AuthError::Client("invalid_client: Unauthorized".into()))], vec![]);
         let outcome = Session::new(client.clone(), grant(), None, Instant::now()).read(&google, &store, Instant::now(), 0).await;
@@ -423,9 +482,9 @@ mod tests {
     fn the_last_agenda_at_a_start() {
         let d = dir("last");
         let store = Arc::new(Store::at(&d));
-        let link = Link::new(store.clone());
+        let mut link = Link::new(store.clone());
         assert_eq!(link.last(), (false, None));
-        let agenda = link.connected(read(2), 1_763_285_400);
+        let agenda = link.connected(read(2), 1_763_285_400, Instant::now());
         assert_eq!(mode(d.join(LAST_AGENDA)), 0o600);
         assert_eq!(link.last(), (false, Some(agenda)));
         // older than a day: not shown
@@ -437,6 +496,62 @@ mod tests {
         let month = SystemTime::now() - Duration::from_secs(30 * 24 * 3600);
         fs::File::options().write(true).open(d.join(LAST_AGENDA)).unwrap().set_modified(month).unwrap();
         assert_eq!(link.last(), (true, None));
+    }
+
+    #[test]
+    fn a_read_a_minute_and_a_backoff_on_failures() {
+        let mut pace = Pace::default();
+        assert_eq!(pace.after_read(), POLL_INTERVAL);
+        assert_eq!(POLL_INTERVAL, Duration::from_secs(60));
+        // an outage: 2, 4, 8 ... s, never more often, at most 5 minutes apart
+        let waits: Vec<u64> = (0..10).map(|_| pace.after_failure().as_secs()).collect();
+        assert_eq!(waits, [2, 4, 8, 16, 32, 64, 128, 256, 300, 300]);
+        // an hour of outage is a handful of requests, not one a minute or a second
+        let mut pace = Pace::default();
+        let (mut spent, mut requests) = (Duration::ZERO, 0);
+        while spent < Duration::from_secs(3600) {
+            spent += pace.after_failure();
+            requests += 1;
+        }
+        assert!(requests <= 20, "{requests}");
+        // a read that works again: the minute again, and the next failure from 2 s
+        assert_eq!(pace.after_read(), POLL_INTERVAL);
+        assert_eq!(pace.after_failure(), RETRY_FIRST);
+    }
+
+    #[test]
+    fn an_unchanged_agenda_is_not_written_every_minute() {
+        let d = dir("keep");
+        let mut link = Link::new(Arc::new(Store::at(&d)));
+        let kept = || Agenda::parse_from_bytes(&fs::read(d.join(LAST_AGENDA)).unwrap()).unwrap().updated;
+        let t0 = Instant::now();
+        link.connected(read(2), 1000, t0);
+        assert_eq!(kept(), 1000);
+        // a minute later, the same events: published with the new time, not written
+        assert_eq!(link.connected(read(2), 1060, t0 + Duration::from_secs(60)).updated, 1060);
+        assert_eq!(kept(), 1000);
+        // changed: written at once
+        link.connected(read(3), 1120, t0 + Duration::from_secs(120));
+        assert_eq!(kept(), 1120);
+        // the same for an hour: written again
+        link.connected(read(3), 4720, t0 + Duration::from_secs(120) + KEEP_EVERY);
+        assert_eq!(kept(), 4720);
+        // after an expiry the next read is written whatever it is
+        link.revoked();
+        link.connected(read(3), 4780, t0 + Duration::from_secs(180) + KEEP_EVERY);
+        assert_eq!(kept(), 4780);
+    }
+
+    #[test]
+    fn the_setup_url_for_development() {
+        let d = dir("url");
+        let link = Link::new(Arc::new(Store::at(&d)));
+        link.setup_url("http://192.168.1.23:8765/setup?t=abc");
+        assert_eq!(fs::read_to_string(d.join(SETUP_URL_FILE)).unwrap(), "http://192.168.1.23:8765/setup?t=abc\n");
+        assert_eq!(mode(d.join(SETUP_URL_FILE)), 0o600);
+        link.setup_url("");
+        assert!(!d.join(SETUP_URL_FILE).exists());
+        link.setup_url("");
     }
 
     #[test]

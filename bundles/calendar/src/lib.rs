@@ -14,7 +14,7 @@
 //! Home Assistant does (Google's OAuth for a web application with PKCE; a QR code on the screen,
 //! the phone does the consent, a static relay page sends the phone back to this bundle's setup
 //! page on the local network), keeps the account's refresh token in its own directory, reads the
-//! next seven days of the account's primary calendar every five minutes and publishes them on the
+//! next seven days of the account's primary calendar every minute and publishes them on the
 //! topic `agenda` (catalog/calendar.proto, catalog/everyware.vsidl), with the state of the link.
 //! The screen gets it through the dashboard bundle. README.md has the flow and the security.
 //!
@@ -27,7 +27,7 @@
 use everyware_bundle_store::Store;
 use everyware_calendar_client::events::DAYS;
 use everyware_calendar_client::google::Live;
-use everyware_calendar_client::link::{agenda_of, Link, Outcome, Session, CLIENT_FILE};
+use everyware_calendar_client::link::{agenda_of, Link, Outcome, Pace, Session, CLIENT_FILE, POLL_INTERVAL, SETUP_URL_FILE};
 use everyware_calendar_client::net;
 use everyware_calendar_client::oauth::{ClientConfig, Grant, Tokens};
 use everyware_calendar_client::server::{Limits, SetupEnd, SetupPage};
@@ -43,12 +43,6 @@ use tokio::net::TcpListener;
 use tokio::time::sleep;
 use tokio_util::sync::CancellationToken;
 
-/// A calendar changes slowly; five minutes keeps a new appointment on the screen soon enough.
-const POLL_INTERVAL: Duration = Duration::from_secs(300);
-/// A failed read is tried again after this, then after twice as long each time, up to
-/// `RETRY_MAX`: the bundle starts seconds before the network is there, so the first ones fail.
-const RETRY_FIRST: Duration = Duration::from_secs(2);
-const RETRY_MAX: Duration = Duration::from_secs(300);
 /// While there is no usable client, the bundle looks at its file this often.
 const CLIENT_CHECK: Duration = Duration::from_secs(10);
 /// While the setup page is open: the panel's address read again and the token replaced when due.
@@ -152,6 +146,8 @@ fn unix_now() -> i64 {
 /// last agenda of the previous start goes out first, with a grant and when it is a day old at most.
 async fn handle_agenda_publisher(mut out: Output, mut link: Link) {
     let (mut expired, mut kept) = link.last();
+    // a setup URL a stopped bundle left holds a token of no page any more
+    link.setup_url("");
     let mut no_client = String::new();
     loop {
         let client = match link.client() {
@@ -180,7 +176,7 @@ async fn handle_agenda_publisher(mut out: Output, mut link: Link) {
                 }
                 Session::new(client, grant, None, Instant::now())
             }
-            None => match run_setup(&client, &mut out, expired).await {
+            None => match run_setup(&client, &link, &mut out, expired).await {
                 SetupEnd::Linked(grant, tokens) => {
                     expired = false;
                     linked(&link, &mut out, client, grant, tokens)
@@ -192,7 +188,7 @@ async fn handle_agenda_publisher(mut out: Output, mut link: Link) {
                 }
             },
         };
-        match read_agenda(session, &link, &mut out).await {
+        match read_agenda(session, &mut link, &mut out).await {
             Ended::Revoked(why) => {
                 warn!("the account's grant is not good any more ({why}): the setup page again");
                 expired = true;
@@ -215,7 +211,7 @@ fn linked(link: &Link, out: &mut Output, client: ClientConfig, grant: Grant, tok
 /// Until an account is linked or Google refuses the client: the setup page on port 8765 of every
 /// interface, and its URL in the agenda (a new one after every use and every ten minutes, and
 /// when the panel's address changes). The page closes when this returns.
-async fn run_setup(client: &ClientConfig, out: &mut Output, expired: bool) -> SetupEnd {
+async fn run_setup(client: &ClientConfig, files: &Link, out: &mut Output, expired: bool) -> SetupEnd {
     let link = if expired { CalendarLink::CALENDAR_EXPIRED } else { CalendarLink::CALENDAR_NOT_CONNECTED };
     let listener = loop {
         match TcpListener::bind((Ipv4Addr::UNSPECIFIED, PORT)).await {
@@ -228,6 +224,7 @@ async fn run_setup(client: &ClientConfig, out: &mut Output, expired: bool) -> Se
         }
     };
     let (page, mut events) = SetupPage::start(Live, client.clone(), Limits::default(), Instant::now());
+    info!("the setup URL, for development: adb root, then cat <the bundle's directory>/{SETUP_URL_FILE}");
     let mut tick = tokio::time::interval(SETUP_TICK);
     let mut address = None;
     loop {
@@ -236,6 +233,7 @@ async fn run_setup(client: &ClientConfig, out: &mut Output, expired: bool) -> Se
                 if matches!(end, SetupEnd::Linked(..)) {
                     info!("the account is linked, the setup page closes");
                 }
+                files.setup_url("");
                 return end;
             }
             Some(()) = events.used.recv() => {}
@@ -263,8 +261,8 @@ async fn run_setup(client: &ClientConfig, out: &mut Output, expired: bool) -> Se
         let mut agenda = agenda_of(link);
         agenda.setup_url = address.map(|a| page.url(a)).unwrap_or_default();
         if out.last.as_ref().map(|l| &l.setup_url) != Some(&agenda.setup_url) {
-            // the URL carries the one-time token: a debug line only
-            debug!("setup URL {}", agenda.setup_url);
+            // the URL carries the one-time token: not in the log, in a 0600 file for development
+            files.setup_url(&agenda.setup_url);
         }
         out.publish(agenda);
     }
@@ -276,26 +274,32 @@ enum Ended {
     Refused(String),
 }
 
-/// The agenda of the linked account: read at once, then every `POLL_INTERVAL`; a failed read is
-/// tried again sooner. Returns when the grant is not good any more or Google refuses the client.
-async fn read_agenda(mut session: Session, link: &Link, out: &mut Output) -> Ended {
-    let mut retry = RETRY_FIRST;
+/// The agenda of the linked account: read at once, then every `POLL_INTERVAL`; after a failed
+/// read the waits grow (`Pace`). Returns when the grant is not good any more or Google refuses
+/// the client.
+async fn read_agenda(mut session: Session, link: &mut Link, out: &mut Output) -> Ended {
+    let mut pace = Pace::default();
+    let mut count = None;
     info!("reading the calendar every {} s", POLL_INTERVAL.as_secs());
     loop {
-        match session.read(&Live, link.store(), Instant::now(), unix_now()).await {
+        let wait = match session.read(&Live, link.store(), Instant::now(), unix_now()).await {
             Outcome::Read(read) => {
-                info!("{} events in the next {DAYS} days", read.events.len());
-                out.publish(link.connected(read, unix_now()));
-                retry = RETRY_FIRST;
-                sleep(POLL_INTERVAL).await;
+                // a line a minute only when the count changes
+                if count != Some(read.events.len()) {
+                    info!("{} events in the next {DAYS} days", read.events.len());
+                    count = Some(read.events.len());
+                }
+                out.publish(link.connected(read, unix_now(), Instant::now()));
+                pace.after_read()
             }
             Outcome::Revoked(why) => return Ended::Revoked(why),
             Outcome::Refused(why) => return Ended::Refused(why),
             Outcome::Again(why) => {
-                warn!("reading the calendar failed: {why}; again in {} s", retry.as_secs());
-                sleep(retry).await;
-                retry = (retry * 2).min(RETRY_MAX);
+                let wait = pace.after_failure();
+                warn!("reading the calendar failed: {why}; again in {} s", wait.as_secs());
+                wait
             }
-        }
+        };
+        sleep(wait).await;
     }
 }
