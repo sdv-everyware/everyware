@@ -64,3 +64,6 @@ else
   echo ">> the bundle takes the client within 10 s"
 fi
 echo ">> log: adb logcat -s calendar_bundle"
+# The client secret is the only guard against a sign-in flow someone else starts with the public
+# client id (bundles/calendar/README.md, Security): it belongs on the panel only.
+echo ">> now delete $JSON from this computer: the client secret belongs on the panel only"

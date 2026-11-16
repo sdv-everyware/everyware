@@ -189,7 +189,7 @@ manifest and the two forks in the tree (Google's harry, Linaro's board support) 
 |---|---|
 | `catalog/` | `everyware.vsidl`: every bundle, what it publishes, subscribes to and offers; the protos; the generated descriptors |
 | `bundles/` | the service bundles, one APEX each: `weather`, `news`, `calendar`, `wifi`, `matter`, and `dashboard`, the bridge between the bundles and the screen |
-| `libs/` | what the bundles share: `https` (TLS on BoringSSL), `bundle-store` (a bundle's last values, so that they are on the screen at the first frame) |
+| `libs/` | what the bundles share: `https` (TLS on BoringSSL), `bundle-store` (a bundle's own files: its last values, so that they are on the screen at the first frame, and private ones such as the calendar's grant, mode 0600) |
 | `product/` | `everyware.mk` and the SELinux contexts of the bundles: what a device product adds to carry them |
 | `design/figma/` | the kiwi tools: a Figma file written and read without Figma, the roundtrip, `fig2json` |
 | `tools/` | `dcf` (a `.dcf` from Figma or from a `.fig`, the node by node comparison), `matter-generator` (a virtual Matter device on the laptop), `boot-time` (power on to the first frame, measured) |

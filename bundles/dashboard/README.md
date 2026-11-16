@@ -2,12 +2,14 @@
 
 `DashboardServiceBundle` (APEX `com.everyware.dashboard`) stands between the house's topics and
 the screen. It subscribes to what the dashboard shows (`weather`, `wifi-networks`,
-`wifi-state`, `news`, `news-thumbnails`, `matter-devices`, `agenda`) and pushes every message over a
-local gRPC connection to the harry process (`proto/dashboard.proto`, server on 127.0.0.1:7100
-in the app). What goes the other way, the screen's Wi-Fi and Matter commands, it takes from
-server streams of the same connection and calls the Wi-Fi bundle's RPC `WifiService` or the
-Matter bundle's `MatterService` for each; the answer goes back to the screen
-(`PublishWifiResult`, `PublishMatterResult`).
+`wifi-state`, `news`, `news-thumbnails`, `matter-devices`, `agenda`) and pushes every message to
+the panel over binder: the panel serves `IScreenLink` (`interfaces/screen`, `src/screen.rs`) and
+takes a call only from this bundle. What goes the other way, the screen's Wi-Fi and Matter
+commands and its settings changes, comes into the sink the bundle hands the panel
+(`ICommandSink`); the bundle calls the Wi-Fi bundle's RPC `WifiService` or the Matter bundle's
+`MatterService` for each, and the answer goes back to the screen (`publishWifiResult`,
+`publishMatterResult`). `proto/dashboard.proto` is the gRPC link that hub, tv and pairs still
+build against; the panel does not serve it.
 
 ```
 SDV (lifecycle, discovery, authz, topics)            harry (DRM, GPU, touch: a plain process)

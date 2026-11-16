@@ -40,8 +40,10 @@ uses the flow of a web application, with no server of its own:
    at Google's token endpoint, keeps the refresh token, closes the setup page and reads the
    calendar at once. The phone shows "Done. You can close this page."
 
-The scope is `calendar.events.readonly`, the primary calendar only. The tokens never leave the
-panel; the relay page sees the code, which is useless without the verifier.
+The scope is `calendar.events.readonly`: Google grants read access to the events of every calendar
+of the account; the code reads the primary calendar only. The tokens never leave the panel. The
+relay page sees the code of the panel's own flow, which is useless without the panel's verifier
+and the client secret.
 
 ## What goes where
 
@@ -78,7 +80,9 @@ The owner of the panel makes the client in the Google Cloud console:
 ANDROID_SERIAL=<serial> vendor/sdv-everyware/everyware/scripts/calendar-client.sh client_secret_….json
 ```
 
-The script needs adb as root. A bundle without a client finds the file within 10 s; one with
+Then delete the JSON from the computer: its secret is the only guard against a sign-in someone
+else starts with the public client id (Security). The script needs adb as root. A bundle
+without a client finds the file within 10 s; one with
 a client is restarted. A missing or broken file publishes `CALENDAR_NO_CLIENT` (the log says
 why), and so does a client Google refuses (next section).
 
@@ -167,14 +171,27 @@ state, so the relay page sends the phone back to the same one.
 
 ## Security
 
-- The refresh token is the key to the account's events. It is in the bundle's directory only
+- The refresh token is the key to the account's events, of all its calendars (the scope is not
+  narrower than that; the code reads the primary one). It is in the bundle's directory only
   (SDV's `service_bundle_data`, the bundle's uid, mode 0600), never published, never in the log.
-  The scope is read-only and events only.
-- The setup page is plain HTTP on the local network and open only while no account is linked.
-  Its token is random (32 bytes), good once and for ten minutes (a replaced one for one more
-  minute), so only someone who sees the screen can begin a link. The flow's nonce is good once
-  and for ten minutes; a code without the panel's PKCE verifier is worthless, so a code seen on
-  the network or on the relay page cannot be used.
+  The scope is read-only.
+- The setup page is plain HTTP on the local network, open only while a client is there and no
+  account is linked. Its token is random (32 bytes), good once and for ten minutes (a replaced
+  one for one more minute), so only someone who sees the screen can begin a link of the panel.
+  The flow's nonce is good once and for ten minutes. PKCE makes the code of the panel's own flow
+  worthless without the verifier the bundle keeps, so that code seen on the network or on the
+  relay page cannot be used.
+- What PKCE does not do: stop a flow someone else starts. The client id is public (it is in every
+  redirect to Google), so an attacker can build his own authorization URL with his own challenge
+  and a state that points at a host of his on the owner's network (port 8765), and get the owner
+  to consent; the relay page then hands that host the owner's code. Only the client secret keeps
+  him from exchanging it. The secret therefore belongs on the panel only (0600):
+  `calendar-client.sh` asks the owner to delete the downloaded JSON after the push.
+- What it does not do either: a person who reads the Wi-Fi traffic while the owner opens the
+  setup page sees the challenge and the state in the redirect, can finish that flow with his own
+  account first, and the panel then links his calendar (no access to the owner's data, but his
+  agenda on the screen). The screen shows the linked calendar's title (the account's address);
+  there is no confirm or undo on the panel yet.
 - The setup page answers GET on `/setup` and `/callback` only, reads at most 4 kB of a request
   in 10 s, serves 8 connections at a time, and its pages run nothing (`default-src 'none'`),
   are not cached and send no referrer. It closes a connection by dropping it: `shutdown()` is not
@@ -183,8 +200,8 @@ state, so the relay page sends the phone back to the same one.
   `/callback`, with the code and the state. A crafted link can therefore make a browser call
   `GET /callback` on port 8765 of a host on its own network; it cannot send the browser anywhere
   else.
-- The client secret is the owner's own client, put on the panel by adb. A secret of a web
-  client is not a strong secret on a device anyway; PKCE and the state carry the proof.
+- The client secret is the owner's own client, put on the panel by adb, never in git or in the
+  image.
 - The calendar's title and the events are untrusted text: control characters taken out, cut to
   the catalog's bounds (the title 256 bytes, the place 128).
 - A private or confidential event is "Busy" without its place: the panel is seen by everyone in
@@ -214,7 +231,7 @@ state, so the relay page sends the phone back to the same one.
     missing fields, long text, Google's order kept), the setup page's requests, the address from
     `/proc/net`. `everyware_bundle_store_test`: the private file.
 - The relay page: `node vendor/sdv-everyware/everyware/pages/test/oauth.test.js`.
-- On the board: `adb logcat -s calendar_bundle` ("no OAuth client", "the setup page: open on
+- On the board (not run there yet; these are the lines the code writes, with example values):
+  `adb logcat -s calendar_bundle` should show "no OAuth client", "the setup page: open on
   192.168.1.23:8765", "the setup page: a link begins", "the account is linked", "12 events in
-  the next 7 days"); the bridge: `-s dashboard_bundle` ("agenda: CALENDAR_CONNECTED, 12
-  events").
+  the next 7 days"; the bridge, `-s dashboard_bundle`, "agenda: CALENDAR_CONNECTED, 12 events".
