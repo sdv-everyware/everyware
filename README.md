@@ -234,7 +234,7 @@ image is signed with test keys. Details in [`docs/project/status.md`](docs/proje
 
 What comes next is tracked as [issues](https://github.com/sdv-everyware/everyware/issues), each
 with the problem it solves and the alternatives considered: the bundles in the product, the smart home panel on the public tree, the emulator
-and the Raspberry Pi as targets, a browser and a camera feed in a zone of the screen, SELinux
+and the Raspberry Pi as targets, a browser (experimental) and a camera feed in a zone of the screen, SELinux
 enforcing, device discovery.
 
 ## Learn more
