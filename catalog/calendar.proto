@@ -76,4 +76,14 @@ message AgendaEvent {
     // The event's own colour as 0xRRGGBB (Google's event palette); 0: the event has none, the
     // screen uses its default.
     uint32 color = 7;
+    // The event's description as plain text: Google's HTML made text (the tags taken out, a line
+    // break for <br> and the end of a paragraph or a list item, the entities decoded), control and
+    // direction characters taken out except the line break, no more than one blank line in a row,
+    // cut at a character with an ellipsis. Untrusted text from whoever wrote the event or sent the
+    // invitation. Empty for a private or confidential event.
+    string description = 8 [(.sdv.vsidl.v1.variable_type_max_size) = 2000];
+    // The video meeting of the event: its Google Meet link (hangoutLink), else the first video
+    // entry point of its conference data. https only; empty for none and for a private or
+    // confidential event.
+    string meeting_url = 9 [(.sdv.vsidl.v1.variable_type_max_size) = 256];
 }

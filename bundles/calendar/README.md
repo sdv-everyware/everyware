@@ -64,8 +64,10 @@ and the client secret.
 | | |
 |---|---|
 | topic `agenda` (`Agenda`) | the link (`CALENDAR_NO_CLIENT`, `CALENDAR_NOT_CONNECTED`, `CALENDAR_CONNECTED`, `CALENDAR_EXPIRED`), the setup URL while there is no account, the calendar's title, up to 40 events in Google's order, the time of the last read |
-| an event (`AgendaEvent`) | Google's id, title, place, start and end (unix seconds; an all-day event at 00:00 UTC, the end exclusive), all day or not, the event's own colour from Google's event palette (0: none, the screen's default) |
-| a private or confidential event | the title "Busy", no place |
+| an event (`AgendaEvent`) | Google's id, title, place, start and end (unix seconds; an all-day event at 00:00 UTC, the end exclusive), all day or not, the event's own colour from Google's event palette (0: none, the screen's default), its description and its video meeting link (for the details a tap opens) |
+| the description | plain text, at most 2000 bytes: Google keeps one written in Calendar's editor as HTML, so the tags are taken out (a line break for `<br>`, a line of their own for paragraphs, `div`s and list items, "• " before an item), the entities decoded, control and direction characters taken out except the line break, no more than one blank line in a row, cut at a character with an ellipsis |
+| the meeting link | the Google Meet link (`hangoutLink`), else the first video entry point of the conference data (Zoom, Teams); https only, at most 256 bytes, else empty |
+| a private or confidential event | the title "Busy", no place, no description, no meeting link |
 | a recurring event | each occurrence of the seven days is an event (`singleEvents=true`) |
 | a cancelled event, an invitation the account declined | not in the agenda (`fields` asks for the account's own answer only: `attendees(self,responseStatus)`, `maxAttendees=1`) |
 | the order | Google's (`orderBy=startTime`): by start in the calendar's time zone, an all-day event at the start of its day there. The bundle does not sort again: an all-day event's 00:00 UTC is 19:00 the day before in New York, so sorted by it Tuesday's holiday would come before Monday's dinner |
@@ -187,6 +189,11 @@ cannot be combined with `timeMin`, `timeMax` and `orderBy`, so it would sync the
 and the bundle would have to merge the changes into its own copy. `agenda.pb` is written when
 the agenda changed and otherwise once an hour, not every minute (the reads change only `updated`).
 
+With the descriptions an agenda is at most about 112 kB (40 events with 2000 bytes of
+description, 256 of meeting link and the rest of their bounds). The topic carries it as one
+message (the news' thumbnails are 324 kB), and the dashboard bundle hands it to the panel in one
+binder call, within binder's 1 MB buffer. Usually it is a few kB.
+
 ## The panel's address
 
 The setup URL carries the panel's IPv4 address on the network: the local address on the subnet
@@ -230,6 +237,12 @@ state, so the relay page sends the phone back to the same one.
   image.
 - The calendar's title and the events are untrusted text: control characters taken out, cut to
   the catalog's bounds (the title 256 bytes, the place 128).
+- A description is untrusted text from whoever wrote the event or sent the invitation (a stranger's
+  invitation too, unless the owner declined it), and it may hold what a meeting needs: a dial-in
+  PIN, a document link. It goes to the shared screen as plain text only (HTML made text in the
+  bundle, in linear time: a crafted description costs its length), and the screen shows it only
+  when someone taps the event. The meeting link is https only; a private or confidential event
+  has neither.
 - A private or confidential event is "Busy" without its place: the panel is seen by everyone in
   the room. The calendar's title of a primary calendar is the account's address; the screen
   decides whether it shows it.

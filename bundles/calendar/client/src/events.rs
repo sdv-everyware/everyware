@@ -27,7 +27,8 @@ pub const DAYS: i64 = 7;
 pub const MAX_EVENTS: usize = 40;
 /// Only what the agenda needs; of the attendees only the account's own answer (with
 /// `maxAttendees=1` Google lists only the account itself).
-pub const FIELDS: &str = "summary,items(id,status,summary,location,visibility,colorId,start,end,attendees(self,responseStatus))";
+pub const FIELDS: &str =
+    "summary,items(id,status,summary,location,visibility,colorId,start,end,attendees(self,responseStatus),description,hangoutLink,conferenceData(entryPoints(entryPointType,uri)))";
 /// The title of a private or confidential event.
 pub const BUSY: &str = "Busy";
 /// The catalog's bounds (catalog/calendar.proto), in bytes.
@@ -35,6 +36,10 @@ const MAX_CALENDAR: usize = 64;
 const MAX_ID: usize = 128;
 const MAX_TITLE: usize = 256;
 const MAX_LOCATION: usize = 128;
+/// The description, at most (bytes): 40 of them are 80 kB of an agenda, within a binder call.
+pub const MAX_DESCRIPTION: usize = 2000;
+/// The meeting link, at most (bytes); a longer one is left out, not cut.
+pub const MAX_MEETING_URL: usize = 256;
 /// 40 events with the fields above are some 20 kB.
 const MAX_REPLY: usize = 1024 * 1024;
 
@@ -154,6 +159,10 @@ fn event(item: &Value) -> Option<AgendaEvent> {
     e.id = text(item["id"].as_str().unwrap_or(""), MAX_ID);
     e.title = if private { BUSY.to_string() } else { text(item["summary"].as_str().unwrap_or(""), MAX_TITLE) };
     e.location = if private { String::new() } else { text(item["location"].as_str().unwrap_or(""), MAX_LOCATION) };
+    if !private {
+        e.description = description(item["description"].as_str().unwrap_or(""), MAX_DESCRIPTION);
+        e.meeting_url = meeting_url(item);
+    }
     e.start = start;
     e.end = end;
     e.all_day = all_day;
@@ -172,6 +181,163 @@ fn when(v: &Value) -> Option<(i64, bool)> {
         return Some((time::parse_date(date)?, true));
     }
     Some((time::parse_rfc3339(v["dateTime"].as_str()?)?, false))
+}
+
+/// The event's video meeting: its Google Meet link, else the first video entry point of its
+/// conference data; https only, at most `MAX_MEETING_URL` bytes, else empty.
+fn meeting_url(item: &Value) -> String {
+    let good = |uri: &&str| uri.starts_with("https://") && uri.len() <= MAX_MEETING_URL && !uri.chars().any(|c| c.is_whitespace() || c.is_control());
+    let hangout = item["hangoutLink"].as_str().filter(good);
+    let video = || {
+        item["conferenceData"]["entryPoints"].as_array()?.iter().find(|e| e["entryPointType"] == "video")?["uri"].as_str().filter(good)
+    };
+    hangout.or_else(video).unwrap_or("").to_string()
+}
+
+/// A description as plain text: Google keeps a description written in Calendar's editor as HTML
+/// (`<b>`, `<br>`, `<a href>`, `<ul><li>`), one written through the API as text. The tags are taken
+/// out (with the content of `<script>` and `<style>`); `<br>` is a line break, a paragraph, a
+/// `div`, a list and a heading start and end on a line of their own, a list item with "• "; the
+/// entities are decoded after that, so `&lt;b&gt;` stays text; tabs and runs of spaces are one
+/// space; control and direction characters go, except the line break; no more than one blank line
+/// in a row, none at the start or the end; cut at a character to `max` bytes with an ellipsis.
+pub fn description(html: &str, max: usize) -> String {
+    let text = decode_entities(&strip_tags(&html.replace("\r\n", "\n").replace('\r', "\n")));
+    let mut lines: Vec<String> = Vec::new();
+    for line in text.split('\n') {
+        let clean: String = line.chars().map(|c| if c == '\u{a0}' || c == '\t' { ' ' } else { c }).filter(|c| !c.is_control() && !is_bidi(*c)).collect();
+        let line = clean.split(' ').filter(|w| !w.is_empty()).collect::<Vec<_>>().join(" ");
+        // one blank line at most
+        if line.is_empty() && lines.last().is_none_or(|l| l.is_empty()) {
+            continue;
+        }
+        lines.push(line);
+    }
+    while lines.last().is_some_and(|l| l.is_empty()) {
+        lines.pop();
+    }
+    let flat = lines.join("\n");
+    if flat.len() <= max {
+        return flat;
+    }
+    let mut cut = max.saturating_sub('…'.len_utf8());
+    while !flat.is_char_boundary(cut) {
+        cut -= 1;
+    }
+    format!("{}…", flat[..cut].trim_end())
+}
+
+/// The direction controls (LRM, RLM, ALM, the embeddings, overrides and isolates): they can make
+/// text read in another order than it is.
+fn is_bidi(c: char) -> bool {
+    matches!(c, '\u{200e}' | '\u{200f}' | '\u{061c}' | '\u{202a}'..='\u{202e}' | '\u{2066}'..='\u{2069}')
+}
+
+/// The text of HTML without its tags: a line break for `<br>`, a line of their own for the block
+/// elements (`p`, `div`, lists, headings, rows), "• " before a list item; the content of `script`
+/// and `style` left out. A `<` that does not open a tag (`a < b`, no `>` after it, another `<`
+/// before its `>`) is text.
+fn strip_tags(html: &str) -> String {
+    // Every step consumes what it looked at, so the work is linear in the text: a crafted
+    // description ("<a<a<a...") costs no more than its length.
+    let mut out = String::with_capacity(html.len());
+    let mut rest = html;
+    while let Some(i) = rest.find('<') {
+        out.push_str(&rest[..i]);
+        rest = &rest[i..];
+        if !rest[1..].chars().next().is_some_and(|c| c.is_ascii_alphabetic() || c == '/' || c == '!') {
+            out.push('<');
+            rest = &rest[1..];
+            continue;
+        }
+        // the tag ends at the first '>', unless another '<' comes first: then this '<' is text
+        let Some(at) = rest[1..].find(['<', '>']).map(|k| k + 1) else {
+            out.push_str(rest);
+            return out;
+        };
+        if rest.as_bytes()[at] == b'<' {
+            out.push_str(&rest[..at]);
+            rest = &rest[at..];
+            continue;
+        }
+        let inside = &rest[1..at];
+        let closing = inside.starts_with('/');
+        let tag = inside.trim_start_matches('/').split(|c: char| c.is_whitespace() || c == '/').next().unwrap_or("").to_ascii_lowercase();
+        rest = &rest[at + 1..];
+        match tag.as_str() {
+            "br" => out.push('\n'),
+            "li" if !closing => {
+                line_start(&mut out);
+                out.push_str("• ");
+            }
+            "p" | "div" | "ul" | "ol" | "li" | "h1" | "h2" | "h3" | "h4" | "h5" | "h6" | "tr" | "table" | "blockquote" | "pre" => line_start(&mut out),
+            // their content too, up to the closing tag, or the end
+            "script" | "style" if !closing => rest = closing_tag(rest, &tag).map_or("", |k| &rest[k..]),
+            _ => {}
+        }
+    }
+    out.push_str(rest);
+    out
+}
+
+/// Where `</tag` starts in `rest`, in any case.
+fn closing_tag(rest: &str, tag: &str) -> Option<usize> {
+    let bytes = rest.as_bytes();
+    let mut from = 0;
+    while let Some(k) = rest[from..].find("</") {
+        let at = from + k;
+        if bytes.get(at + 2..at + 2 + tag.len()).is_some_and(|name| name.eq_ignore_ascii_case(tag.as_bytes())) {
+            return Some(at);
+        }
+        from = at + 2;
+    }
+    None
+}
+
+/// A new line unless the text is at the start of one.
+fn line_start(out: &mut String) {
+    if !out.is_empty() && !out.ends_with('\n') {
+        out.push('\n');
+    }
+}
+
+/// The entities of HTML text: the named ones a description uses (`&amp;` `&lt;` `&gt;` `&quot;`
+/// `&apos;` `&nbsp;`) and the numeric ones; anything else stays as it is.
+fn decode_entities(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    let mut rest = s;
+    while let Some(i) = rest.find('&') {
+        out.push_str(&rest[..i]);
+        rest = &rest[i..];
+        // the ';' within the longest name we know ("#x10FFFF"), not anywhere after
+        let entity = rest.as_bytes()[1..].iter().take(9).position(|&b| b == b';').map(|e| &rest[1..e + 1]);
+        let c = entity.and_then(|name| match name {
+            "amp" => Some('&'),
+            "lt" => Some('<'),
+            "gt" => Some('>'),
+            "quot" => Some('"'),
+            "apos" | "#39" => Some('\''),
+            "nbsp" => Some('\u{a0}'),
+            _ => name
+                .strip_prefix("#x")
+                .or_else(|| name.strip_prefix("#X"))
+                .and_then(|h| u32::from_str_radix(h, 16).ok())
+                .or_else(|| name.strip_prefix('#').and_then(|d| d.parse().ok()))
+                .and_then(char::from_u32),
+        });
+        match (c, entity) {
+            (Some(c), Some(name)) => {
+                out.push(c);
+                rest = &rest[name.len() + 2..];
+            }
+            _ => {
+                out.push('&');
+                rest = &rest[1..];
+            }
+        }
+    }
+    out.push_str(rest);
+    out
 }
 
 /// Text for the screen: control characters as spaces, the white space collapsed, cut at a
@@ -311,6 +477,84 @@ mod tests {
         assert!(matches!(api_error(403, br#"{"error":{"errors":[{"reason":"rateLimitExceeded"}]}}"#), ApiError::Other(_)));
         assert!(matches!(api_error(500, b"<html>"), ApiError::Other(_)));
         assert!(matches!(api_error(404, b""), ApiError::Other(_)));
+    }
+
+    #[test]
+    fn a_description_from_html_to_text() {
+        // as Calendar's editor writes it
+        let html = "Agenda:<br><b>1.</b> Budget &amp; plan<br><br><br><br>Join: <a href=\"https://example.org/x\">the page</a>\
+            <ul><li>one</li><li>two &lt;b&gt;</li></ul><p>Bye&nbsp;now</p>";
+        assert_eq!(description(html, MAX_DESCRIPTION), "Agenda:\n1. Budget & plan\n\nJoin: the page\n• one\n• two <b>\nBye now");
+        // as the API writes it: plain text with its own line breaks
+        assert_eq!(description("Line 1\r\n\r\n\r\n\r\nLine 2\n\n  \nLine   3\t\tend\n\n", 2000), "Line 1\n\nLine 2\n\nLine 3 end");
+        // a < that opens no tag is text; scripts and styles go with their content
+        assert_eq!(description("a < b and c<d<script>alert(1)</script><style>p{}</style> e", 2000), "a < b and c<d e");
+        assert_eq!(description("<STYLE>x</style>y<br/>z<script>never closed", 2000), "y\nz");
+        // entities after the tags: a decoded "<b>" stays text; unknown ones stay as they are
+        assert_eq!(description("&lt;b&gt;x&lt;/b&gt; &amp;amp; &#x1F600; &#39;q&#39; &unknown; &", 2000), "<b>x</b> &amp; 😀 'q' &unknown; &");
+        // control and direction characters go, the line break stays
+        assert_eq!(description("a\u{202e}b\u{7}c\u{2066}d\u{200f}\ne\u{0}f", 2000), "abcd\nef");
+        assert_eq!(description("&#x202E;evil&#8238;", 2000), "evil");
+        assert_eq!(description("", 2000), "");
+        assert_eq!(description("<br><p></p>&nbsp;", 2000), "");
+    }
+
+    #[test]
+    fn crafted_markup_costs_its_length() {
+        // a megabyte of almost-tags, of script tags and of ampersands: linear, well under a second
+        let started = std::time::Instant::now();
+        for crafted in ["<a".repeat(500_000), "<script></script>".repeat(60_000), "&".repeat(1_000_000), "<a ".repeat(300_000) + ">"] {
+            let text = description(&crafted, MAX_DESCRIPTION);
+            assert!(text.len() <= MAX_DESCRIPTION);
+        }
+        assert!(started.elapsed() < std::time::Duration::from_secs(2), "{:?}", started.elapsed());
+        assert_eq!(description("<a<b>c", 2000), "<ac");
+    }
+
+    #[test]
+    fn a_description_is_cut_at_a_character() {
+        let long = "ä".repeat(1500);
+        let cut = description(&long, MAX_DESCRIPTION);
+        assert!(cut.len() <= MAX_DESCRIPTION && cut.ends_with('…'), "{}", cut.len());
+        assert!(cut.starts_with("ää"));
+        let lines = format!("{}\n{}", "a".repeat(1000), "b".repeat(1500));
+        let cut = description(&lines, MAX_DESCRIPTION);
+        assert!(cut.len() <= MAX_DESCRIPTION && cut.starts_with(&"a".repeat(1000)) && cut.ends_with("b…"));
+    }
+
+    #[test]
+    fn details_of_an_event() {
+        let list = r#"{"items": [
+            {"id": "meet", "description": "Weekly <b>sync</b>", "hangoutLink": "https://meet.google.com/abc-defg-hij",
+             "conferenceData": {"entryPoints": [{"entryPointType": "video", "uri": "https://zoom.example/j/1"}]},
+             "start": {"dateTime": "2026-11-16T09:00:00Z"}},
+            {"id": "zoom", "hangoutLink": "http://meet.google.com/insecure",
+             "conferenceData": {"entryPoints": [{"entryPointType": "phone", "uri": "tel:+1-555-0100"}, {"entryPointType": "more", "uri": "https://x.example/more"},
+                                                {"entryPointType": "video", "uri": "https://zoom.example/j/2"}, {"entryPointType": "video", "uri": "https://zoom.example/j/3"}]},
+             "start": {"dateTime": "2026-11-16T10:00:00Z"}},
+            {"id": "plain", "conferenceData": {"entryPoints": [{"entryPointType": "video", "uri": "http://insecure.example/j"}]},
+             "start": {"dateTime": "2026-11-16T11:00:00Z"}},
+            {"id": "long", "hangoutLink": "https://meet.google.com/{long}", "start": {"dateTime": "2026-11-16T12:00:00Z"}},
+            {"id": "spaced", "hangoutLink": "https://meet.google.com/a b", "start": {"dateTime": "2026-11-16T12:30:00Z"}},
+            {"id": "secret", "visibility": "private", "description": "The interview at Rival Inc", "hangoutLink": "https://meet.google.com/xyz",
+             "start": {"dateTime": "2026-11-16T13:00:00Z"}},
+            {"id": "conf", "visibility": "confidential", "description": "Doctor", "conferenceData": {"entryPoints": [{"entryPointType": "video", "uri": "https://zoom.example/j/9"}]},
+             "start": {"dateTime": "2026-11-16T14:00:00Z"}}
+        ]}"#
+        .replace("{long}", &"a".repeat(MAX_MEETING_URL));
+        let read = parse_events(&list).unwrap();
+        let e = |id: &str| read.events.iter().find(|e| e.id == id).unwrap().clone();
+        // the Meet link first, else the first video entry point; https only
+        assert_eq!((e("meet").meeting_url.as_str(), e("meet").description.as_str()), ("https://meet.google.com/abc-defg-hij", "Weekly sync"));
+        assert_eq!(e("zoom").meeting_url, "https://zoom.example/j/2");
+        assert_eq!(e("plain").meeting_url, "");
+        // too long or with a space: none rather than a broken one
+        assert_eq!(e("long").meeting_url, "");
+        assert_eq!(e("spaced").meeting_url, "");
+        // private and confidential: neither
+        for id in ["secret", "conf"] {
+            assert_eq!((e(id).title.as_str(), e(id).description.as_str(), e(id).meeting_url.as_str()), (BUSY, "", ""), "{id}");
+        }
     }
 
     #[test]
