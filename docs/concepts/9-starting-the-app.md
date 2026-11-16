@@ -28,7 +28,7 @@ flowchart LR
 | the init script | `apex/init.smarthome.rc` | the service `smarthome` and the trigger that starts it |
 | the SELinux labels | `apex/file_contexts` | the binary in HAR's UI process domain `vendor_harplatform` |
 | the product | `device/rb3/sdv_media_db845c/sdv_media_db845c.mk` | `PRODUCT_PACKAGES += com.everyware.smarthome`; HAR's own app is not in the image |
-| the domain | `device/google/sdv/sdv_media_base/har_sample/sepolicy/vendor/harplatform.te` (`BoardConfig.mk`) | what the UI process may do: DRM, GPU, input, audio, its sockets |
+| the domain | `packages/services/display_safety/service/product/sepolicy/harplatform.te` (the board's `BoardConfig.mk` adds it to `BOARD_VENDOR_SEPOLICY_DIRS`) | what the UI process may do: DRM, GPU, input, audio, its sockets |
 
 ## The init script
 
@@ -66,8 +66,8 @@ on property:apex.all.ready=true
 | `mkdir /data/vendor/everyware/smarthome` | the place for a design pushed for a test |
 | `start smarthome` | the service starts; the first frame follows once the design is loaded |
 
-The trigger needs no property of its own: a product that has the APEX has the panel. HAR uses
-`ro.boot.sdv.har.start_harry` because its APEX is in products that do not show it.
+The trigger needs no property of its own: a product that has the APEX has the panel. HAR's APEX
+starts harry on the same trigger (`service/product/harry_apex/init.display_safety.har.rc`).
 
 ## From power on to the first frame
 

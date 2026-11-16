@@ -24,7 +24,7 @@ SERIAL="${SERIAL:-6aeccbe4}"
 MODE="${1:-run}"
 REMOTE_DATA=/data/local/tmp/smarthome-app-data
 # the libraries of the panel APEX; an image without it still has HAR's
-LDP=/apex/com.everyware.smarthome/lib64:/apex/com.google.sdv.display_safety.har/lib64:/system/lib64:/vendor/lib64
+LDP=/apex/com.everyware.smarthome/lib64:/apex/com.google.display_safety.har/lib64:/system/lib64:/vendor/lib64
 A() { adb -s "$SERIAL" "$@"; }
 
 if [ "$MODE" = "all" ]; then
