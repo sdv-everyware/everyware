@@ -138,6 +138,10 @@ impl Screen {
         self.publish("settings", settings, |link, bytes| link.publishSettings(bytes));
     }
 
+    pub fn publish_agenda<M: Message>(&self, agenda: &M) {
+        self.publish("agenda", agenda, |link, bytes| link.publishAgenda(bytes));
+    }
+
     /// One call to the panel; dropped while it is not linked (connect sends the last values).
     fn publish<M: Message>(&self, what: &str, message: &M, call: impl FnOnce(&Strong<dyn IScreenLink>, &[u8]) -> binder::Result<()>) {
         // Only to a panel that took the sink: it takes a value on the same caller check, and

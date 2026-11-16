@@ -28,6 +28,10 @@ subscriber {
   message: "com.everyware.MatterDevices"
   topic: "matter-devices"
 }
+subscriber {
+  message: "com.everyware.Agenda"
+  topic: "agenda"
+}
 client {
   service: "com.everyware.WifiService"
   channel: "wifi"

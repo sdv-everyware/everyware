@@ -1,0 +1,60 @@
+// The agenda of the house, as the calendar bundle publishes it (bundles/calendar): the next
+// seven days of the primary Google Calendar of the account linked on the panel, and whether an
+// account is linked at all (the screen shows the QR code of the setup page while it is not).
+syntax = "proto3";
+
+package com.everyware;
+
+import "sdv/vsidl/v1/annotations.proto";
+
+// The link between the panel and a Google account.
+enum CalendarLink {
+    // No OAuth client is configured on the panel (oauth-client.json in the bundle's directory,
+    // bundles/calendar/README.md): nothing to set up from the screen.
+    CALENDAR_NO_CLIENT = 0;
+    // No account is linked: setup_url is the page that links one.
+    CALENDAR_NOT_CONNECTED = 1;
+    // An account is linked: the events are its calendar's.
+    CALENDAR_CONNECTED = 2;
+    // The account's grant was revoked or ran out: set up again (setup_url).
+    CALENDAR_EXPIRED = 3;
+}
+
+message Agenda {
+    option (.sdv.vsidl.v1.publication) = {
+        // a new agenda every five minutes; the subscribers want the latest one
+        message_count: 2
+        model: MULTI_PUB
+    };
+    CalendarLink link = 1;
+    // While link is CALENDAR_NOT_CONNECTED or CALENDAR_EXPIRED: the URL the QR code carries, the
+    // panel's setup page on the local network (http://<address>:8765/setup?t=<one-time token>).
+    // A new one after every use and every ten minutes. Empty otherwise, and while the panel has
+    // no address on the network yet.
+    string setup_url = 2 [(.sdv.vsidl.v1.variable_type_max_size) = 256];
+    // The calendar's title (for the primary calendar Google uses the account's address).
+    string calendar = 3 [(.sdv.vsidl.v1.variable_type_max_size) = 64];
+    // The events from now to seven days ahead, sorted by start; an event that has begun and not
+    // ended is among them. Empty unless link is CALENDAR_CONNECTED.
+    repeated AgendaEvent events = 4 [(.sdv.vsidl.v1.repeated_field_max_count) = 40];
+    // Unix time of the last successful read of the calendar; 0 for none.
+    int64 updated = 5;
+}
+
+// One event, or one occurrence of a recurring event.
+message AgendaEvent {
+    // Google's id of the event (of the occurrence, for a recurring event).
+    string id = 1 [(.sdv.vsidl.v1.variable_type_max_size) = 128];
+    // The event's title; "Busy" for a private or confidential event; may be empty.
+    string title = 2 [(.sdv.vsidl.v1.variable_type_max_size) = 256];
+    // Where it is, as written in the event; empty for a private or confidential event.
+    string location = 3 [(.sdv.vsidl.v1.variable_type_max_size) = 128];
+    // Unix time of the start and of the end. An all-day event has its dates at 00:00 UTC, the
+    // end exclusive (one day: end = start + 86400).
+    int64 start = 4;
+    int64 end = 5;
+    bool all_day = 6;
+    // The event's own colour as 0xRRGGBB (Google's event palette); 0: the event has none, the
+    // screen uses its default.
+    uint32 color = 7;
+}

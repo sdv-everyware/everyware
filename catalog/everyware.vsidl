@@ -76,6 +76,19 @@ service_bundle {
     }
 }
 
+# Reads the next seven days of the primary Google Calendar of the account linked on the panel
+# and publishes them as the agenda of the house, with the state of the link (the setup page's
+# URL while no account is linked).
+service_bundle {
+    name: "CalendarServiceBundle"
+
+    publisher {
+        message: "Agenda"
+        topic: "agenda"
+        capacity: 2
+    }
+}
+
 # The bridge to the screen: subscribes to what the dashboard shows and hands it to the harry
 # process over a local gRPC connection (the harry process is no SDV participant); what the
 # screen asks for (a Wi-Fi command) it calls on the bundle that owns the device and hands
@@ -111,6 +124,11 @@ service_bundle {
     subscriber {
         message: "MatterDevices"
         topic: "matter-devices"
+    }
+
+    subscriber {
+        message: "Agenda"
+        topic: "agenda"
     }
 
     client {

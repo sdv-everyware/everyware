@@ -2,7 +2,7 @@
 
 `DashboardServiceBundle` (APEX `com.everyware.dashboard`) stands between the house's topics and
 the screen. It subscribes to what the dashboard shows (`weather`, `wifi-networks`,
-`wifi-state`, `news`, `news-thumbnails`, `matter-devices`) and pushes every message over a
+`wifi-state`, `news`, `news-thumbnails`, `matter-devices`, `agenda`) and pushes every message over a
 local gRPC connection to the harry process (`proto/dashboard.proto`, server on 127.0.0.1:7100
 in the app). What goes the other way, the screen's Wi-Fi and Matter commands, it takes from
 server streams of the same connection and calls the Wi-Fi bundle's RPC `WifiService` or the
@@ -64,7 +64,7 @@ screen never waits for a connect that never started (decisions.md, 2026-11-06).
   (at boot: the weather's and the news' last values, kept from the previous start) reaches
   the screen with its first frame instead of with the next new value.
 - `proto/dashboard.proto`, built as `libeveryware_dashboard_grpc` for both sides.
-- `apex/permissions.textproto`: subscriber of the six topics, client of
+- `apex/permissions.textproto`: subscriber of the seven topics, client of
   `com.everyware.WifiService` on the channel `wifi` and of `com.everyware.MatterService` on the
   channel `matter`.
 
