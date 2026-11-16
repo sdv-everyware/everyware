@@ -6,6 +6,7 @@
 PRODUCT_PACKAGES += \
     com.everyware.weather \
     com.everyware.news \
+    com.everyware.calendar \
     com.everyware.dashboard \
     com.everyware.wifi \
     com.everyware.matter \

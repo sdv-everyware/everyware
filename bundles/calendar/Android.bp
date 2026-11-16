@@ -1,0 +1,44 @@
+// CalendarServiceBundle: the next seven days of the linked Google account's primary calendar,
+// published on the topic "agenda", and the setup page that links the account.
+// The module is shaped as vsidlc generates a service bundle (vsidlc --services).
+
+package {
+    default_applicable_licenses: ["Android-Apache-2.0"],
+}
+
+rust_ffi_shared {
+    name: "libeveryware_calendar_bundle",
+    crate_name: "everyware_calendar_bundle",
+    srcs: ["src/lib.rs"],
+    defaults: ["sdv_tracing@rust_defaults"],
+    rustlibs: [
+        "libtokio",
+        "libtokio_util",
+        "libanyhow",
+        "libfutures",
+        "libfutures_util",
+        "libsdv_rs",
+        "libsdv_mw_rs_com_everyware_calendar_service_bundle",
+        "liblog_rust",
+        "libprotobuf",
+        "libeveryware_catalog",
+        "libsdv_status_rs",
+        // the calendar client (bundles/calendar/client): OAuth, the setup page, the events
+        "libeveryware_calendar_client",
+        // the grant and the last agenda in the bundle's directory (libs/bundle-store)
+        "libeveryware_bundle_store",
+    ],
+    proc_macros: ["libasync_trait"],
+    apex_available: [
+        "//apex_available:platform",
+        "//apex_available:anyapex",
+    ],
+    // Service bundle packages are /product APEXes.
+    product_specific: true,
+    min_sdk_version: "35",
+    arch: {
+        riscv64: {
+            enabled: false,
+        },
+    },
+}

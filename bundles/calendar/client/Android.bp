@@ -1,0 +1,51 @@
+// The calendar client of the calendar bundle (src/lib.rs): Google's OAuth for the account link,
+// the setup page's requests, the Calendar API's events as the agenda. A crate of its own so the
+// parsing has a host test without SDV.
+
+package {
+    default_applicable_licenses: ["Android-Apache-2.0"],
+}
+
+rust_defaults {
+    name: "everyware_calendar_client_defaults",
+    crate_name: "everyware_calendar_client",
+    srcs: ["src/lib.rs"],
+    rustlibs: [
+        "liblog_rust",
+        "libserde_json",
+        "libbase64_rust",
+        "libform_urlencoded",
+        // SHA-256 for PKCE, random tokens, constant-time compare: BoringSSL, already in the
+        // process for TLS
+        "libopenssl",
+        // the agenda's events are the catalog's message
+        "libeveryware_catalog",
+        "libprotobuf",
+        // HTTPS (libs/https): hyper over tokio-openssl over BoringSSL
+        "libeveryware_https",
+    ],
+}
+
+rust_library {
+    name: "libeveryware_calendar_client",
+    defaults: ["everyware_calendar_client_defaults"],
+    // the host tests of the clients that use it
+    host_supported: true,
+    // the calendar bundle is a /product APEX
+    product_available: true,
+    apex_available: [
+        "//apex_available:platform",
+        "//apex_available:anyapex",
+    ],
+    arch: {
+        riscv64: {
+            enabled: false,
+        },
+    },
+}
+
+rust_test_host {
+    name: "everyware_calendar_client_test",
+    defaults: ["everyware_calendar_client_defaults"],
+    test_suites: ["general-tests"],
+}

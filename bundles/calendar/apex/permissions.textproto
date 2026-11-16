@@ -1,0 +1,10 @@
+# proto-file: //system/software_defined_vehicle/middleware/service_authz/proto/sdv/authz/policy/authz_policy.proto
+# proto-message: AuthzPolicy
+#
+# What CalendarServiceBundle may do on the SDV middleware: publish the agenda. The same topic
+# as in catalog/everyware.vsidl.
+
+publisher {
+  message: "com.everyware.Agenda"
+  topic: "agenda"
+}
