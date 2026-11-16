@@ -1,3 +1,15 @@
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//      http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 //! Google's OAuth 2.0 for a web application, as the panel links an account: the client of the
 //! panel's owner (`ClientConfig`), the authorization request with PKCE (RFC 7636, S256) and a
 //! one-time state, the setup page's one-time token, and the token endpoint (the code exchanged,
