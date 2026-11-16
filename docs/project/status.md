@@ -12,7 +12,7 @@ repositories of the project.
 | harry with touch | RB3 | the display through Linaro's prebuilt mesa; `super-harry` carries the commits (one tree per display, pictures kept between frames, two frames in flight, touch scaled to the display) |
 | the house's services in the image | RB3 | the bundles `weather`, `news`, `wifi`, `matter`, `dashboard` as APEXes of the product; `adb remount` puts a rebuilt one on the board |
 | the smart home panel | RB3 | `smarthome-app` as the vendor APEX `com.everyware.smarthome`, started by init |
-| Wayland zones and the browser | RB3 | harry serves Wayland clients in zones of the design, also on a hardware plane; with the experimental browser (an image built with `EVERYWARE_EXPERIMENTAL_BROWSER=true`), a tap on a news story opens its page in Cog ([a browser on the panel](browser.md)) |
+| Wayland zones and the browser | RB3 | harry serves Wayland clients in zones of the design, also on a hardware plane; the experimental browser (an image built with `EVERYWARE_BROWSER=true`, off by default) shows Cog in the panel, and nothing on the dashboard opens a page in it ([a browser on the panel](browser.md)) |
 | the apps on the UI library | RB3 | `tv-app` (first frame 2.2 s after start, 7 to 8 ms per frame), `hub-app`, `pairs-app`; the design document is `<name>.dcf`, opened by name |
 | the design path without Figma | host | a `.fig` written by the kiwi tools, `fig-to-dcf.sh` to the `.dcf` the app ships, `dcf-diff` against Figma's own import: equal |
 

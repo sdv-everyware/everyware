@@ -4,8 +4,8 @@
 news: every ten minutes it takes the top ten stories of Hacker News, reads each new story's
 article once for its description and its picture, and publishes the feed on the topic `news`
 and the thumbnails of its stories on `news-thumbnails` (`catalog/news.proto`,
-`catalog/everyware.vsidl`). The screen gets both through the dashboard bundle and shows them as
-the news feed in the right column; it has no network of its own.
+`catalog/everyware.vsidl`). The dashboard bundle passes both to the panel; the panel takes them
+and shows no news (its right column is the agenda).
 
 ```mermaid
 flowchart LR
@@ -14,7 +14,7 @@ flowchart LR
     NB["NewsServiceBundle<br/>bundles/news"] -. "topic news<br/>(10 stories)" .-> DB["DashboardServiceBundle<br/>bridge"]
     NB -. "topic news-thumbnails<br/>(120 x 90 RGB per story, all in one)" .-> DB
     NB <-- "feed.pb, thumbnails.pb" --> ST[("/data/service_bundle_data/<br/>com.everyware.news/NewsServiceBundle")]
-    DB -- "gRPC 127.0.0.1:7100<br/>PublishNews, PublishNewsThumbnail" --> APP["smarthome_app<br/>#news/list"]
+    DB -- "binder IScreenLink<br/>publishNews, publishNewsThumbnail" --> APP["smarthome_app<br/>(takes them, shows no news)"]
 ```
 
 ## What goes where
@@ -25,7 +25,7 @@ flowchart LR
 | when | every ten minutes: once when the stories are known, again with the summaries of the new ones | after every feed with its summaries |
 | why a topic of its own | the feed is there before the pictures | a picture is 30 times a story; with the feed they would hold it back |
 | why one message | | a subscriber that comes late gets the last message of a topic (`read_on_subscribe`), so it gets every picture |
-| on the screen | a list item (kind image, lines three): the headline, the summary (else "site · points · comments"), the age | the picture of the row, registered under `news/<id>` (everyware_ui::images) |
+| on the panel | none: smarthome_app takes the feed and drops it (the right column is the agenda) | none |
 
 The thumbnail is the size the screen shows, as raw pixels: the bundle decodes and scales the
 picture, the screen has nothing to decode and no picture library to run on untrusted data.

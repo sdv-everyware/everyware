@@ -2,12 +2,13 @@
 
 Experimental, and off by default: the browser runs WPE WebKit from a Debian root, entered as
 root, without WebKit's sandbox (see Security). An image has it only when it is built with
-`EVERYWARE_EXPERIMENTAL_BROWSER=true`; without it a tap on a news story opens nothing. Why it
+`EVERYWARE_BROWSER=true`; without it the panel is built without its browser code. Why it
 is built this way, and the options weighed: [#24](https://github.com/sdv-everyware/everyware/issues/24).
 Its open security problems: [#54](https://github.com/sdv-everyware/everyware/issues/54), points 1 and 4.
 
-A web page runs in a process of its own and shows in the panel's right side; a tap on a news
-story opens its page there. A fault in the browser never takes the dashboard. The device has no
+A web page runs in a process of its own and shows in the panel's right side. Nothing on the
+dashboard opens a page in it: the right column is the agenda. A fault in the browser never takes
+the dashboard. The device has no
 browser of its own (no Java, no WebView), so the browser comes from a Debian root next to the
 system. An image built with the flag starts it by itself when the device has that root; the root is put on the
 device once and is not part of the image.
@@ -36,15 +37,16 @@ cog --platform=wl URL                        WPE WebKit in a Debian root, user b
 ## Turning it on
 
 ```
-export EVERYWARE_EXPERIMENTAL_BROWSER=true   # or set it in the product's makefile
+export EVERYWARE_BROWSER=true   # or set it in the product's makefile
 m
 ```
 
 The image then has the service `everyware_browser`, its scripts, and
-`ro.vendor.everyware.browser=true`. The panel reads that property once at start: with it, a tap
-on a story opens the page, and an ordinary Wayland window (Cog) shows in the panel. Without it the
-panel keeps its Wayland socket for harry's own clients (`har_zone`) and gives no zone to other
-windows. The variable lives in the shell: a later `m` without it builds the image without the
+`ro.vendor.everyware.browser=true`, and the panel is built with its browser code (Soong's
+`everyware`/`browser`, the cfg `browser` of smarthome_app). The panel reads the property once at
+start: with it, an ordinary Wayland window (Cog) shows in the panel. Without the variable the
+panel has no browser code and keeps its Wayland socket for harry's own clients (`har_zone`); it
+gives no zone to other windows. The variable lives in the shell: a later `m` without it builds the image without the
 browser.
 
 ## The Debian root, once per board
