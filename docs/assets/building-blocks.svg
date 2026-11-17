@@ -1,111 +1,124 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="670" viewBox="0 0 1200 670" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif">
+<svg xmlns="http://www.w3.org/2000/svg" width="1320" height="820" viewBox="0 0 1320 820" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif">
   <defs>
     <marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
       <path d="M0,0 L10,5 L0,10 z" fill="#8a93a3"/>
     </marker>
     <style>
       .t { fill: #ffffff; }
-      .h { font-size: 20px; font-weight: 600; }
-      .s { font-size: 14px; opacity: 0.9; }
+      .h { font-size: 21px; font-weight: 600; }
+      .s { font-size: 17px; }
       .g { fill: #8a93a3; }
-      .gh { font-size: 17px; font-weight: 600; }
-      .gs { font-size: 14px; }
-      .lbl { font-size: 13px; font-weight: 600; letter-spacing: 1px; fill: #8a93a3; }
+      .gh { font-size: 19px; font-weight: 600; }
+      .gs { font-size: 17px; }
+      .lbl { font-size: 14px; font-weight: 600; letter-spacing: 1px; fill: #8a93a3; }
+      .tag { font-size: 13px; font-weight: 700; letter-spacing: 1px; }
     </style>
   </defs>
 
   <!-- column labels -->
   <text x="170" y="34" text-anchor="middle" class="lbl">ANDROID, NOT ON THIS DEVICE</text>
-  <text x="600" y="34" text-anchor="middle" class="lbl">THE DEVICE: ANDROID'S SDV MEDIA (AOSP) + EVERYWARE</text>
-  <text x="1030" y="34" text-anchor="middle" class="lbl">AROUND IT</text>
+  <text x="660" y="34" text-anchor="middle" class="lbl">THE DEVICE: ANDROID'S SDV MEDIA (AOSP) + EVERYWARE</text>
+  <text x="1150" y="34" text-anchor="middle" class="lbl">AROUND IT</text>
 
   <!-- ghost column: dropped -->
   <g>
-    <rect x="40" y="150" width="260" height="120" rx="12" fill="none" stroke="#8a93a3" stroke-width="2" stroke-dasharray="7 5"/>
-    <text x="170" y="195" text-anchor="middle" class="g gh">Android apps</text>
-    <text x="170" y="222" text-anchor="middle" class="g gs">Java, Kotlin, an app store,</text>
-    <text x="170" y="242" text-anchor="middle" class="g gs">a launcher, settings</text>
+    <rect x="40" y="166" width="260" height="130" rx="12" fill="none" stroke="#8a93a3" stroke-width="2" stroke-dasharray="7 5"/>
+    <text x="170" y="214" text-anchor="middle" class="g gh">Android apps</text>
+    <text x="170" y="242" text-anchor="middle" class="g gs">Java, Kotlin, an app store,</text>
+    <text x="170" y="264" text-anchor="middle" class="g gs">a launcher, settings</text>
 
-    <rect x="40" y="290" width="260" height="90" rx="12" fill="none" stroke="#8a93a3" stroke-width="2" stroke-dasharray="7 5"/>
-    <text x="170" y="326" text-anchor="middle" class="g gh">Java framework</text>
-    <text x="170" y="352" text-anchor="middle" class="g gs">system_server, Zygote, ART,</text>
-    <text x="170" y="370" text-anchor="middle" class="g gs">SurfaceFlinger</text>
+    <rect x="40" y="316" width="260" height="130" rx="12" fill="none" stroke="#8a93a3" stroke-width="2" stroke-dasharray="7 5"/>
+    <text x="170" y="364" text-anchor="middle" class="g gh">Java framework</text>
+    <text x="170" y="392" text-anchor="middle" class="g gs">system_server, Zygote, ART,</text>
+    <text x="170" y="414" text-anchor="middle" class="g gs">SurfaceFlinger</text>
 
-    <text x="170" y="420" text-anchor="middle" class="g gs">1.6 GB and a long boot</text>
-    <text x="170" y="440" text-anchor="middle" class="g gs">become 577 MB and 5 seconds</text>
+    <text x="170" y="490" text-anchor="middle" class="g gs">1.6 GB and a long boot</text>
+    <text x="170" y="512" text-anchor="middle" class="g gs">become 577 MB and 5 seconds</text>
   </g>
 
   <!-- center stack -->
   <!-- design -->
-  <rect x="340" y="50" width="250" height="80" rx="12" fill="#7C3AED"/>
-  <text x="465" y="78" text-anchor="middle" class="t h">Design</text>
-  <text x="465" y="100" text-anchor="middle" class="t s">the screen as a Figma file,</text>
-  <text x="465" y="118" text-anchor="middle" class="t s">shipped to the device as a .dcf</text>
+  <rect x="340" y="50" width="310" height="96" rx="12" fill="#7C3AED"/>
+  <text x="495" y="80" text-anchor="middle" class="t h">Design</text>
+  <text x="495" y="106" text-anchor="middle" class="t s">the screen as a Figma file,</text>
+  <text x="495" y="128" text-anchor="middle" class="t s">shipped to the device as a .dcf</text>
 
-  <rect x="610" y="50" width="250" height="80" rx="12" fill="#7C3AED"/>
-  <text x="735" y="78" text-anchor="middle" class="t h">UI library</text>
-  <text x="735" y="100" text-anchor="middle" class="t s">components by role, drawn once,</text>
-  <text x="735" y="118" text-anchor="middle" class="t s">behaviour in Rust, used by every app</text>
+  <rect x="670" y="50" width="310" height="96" rx="12" fill="#7C3AED"/>
+  <text x="825" y="80" text-anchor="middle" class="t h">UI library</text>
+  <text x="825" y="106" text-anchor="middle" class="t s">components by role, drawn once,</text>
+  <text x="825" y="128" text-anchor="middle" class="t s">behaviour in Rust, used by every app</text>
 
   <!-- your code -->
-  <rect x="340" y="150" width="250" height="120" rx="12" fill="#2563EB"/>
-  <text x="465" y="186" text-anchor="middle" class="t h">harry app</text>
-  <text x="465" y="212" text-anchor="middle" class="t s">the screen: a Rust state machine</text>
-  <text x="465" y="234" text-anchor="middle" class="t s">drives the design's named layers,</text>
-  <text x="465" y="256" text-anchor="middle" class="t s">drawn straight to the display</text>
+  <rect x="340" y="166" width="310" height="130" rx="12" fill="#2563EB"/>
+  <text x="495" y="200" text-anchor="middle" class="t h">harry app</text>
+  <text x="495" y="228" text-anchor="middle" class="t s">the screen: a Rust state machine</text>
+  <text x="495" y="250" text-anchor="middle" class="t s">drives the design's named layers,</text>
+  <text x="495" y="272" text-anchor="middle" class="t s">drawn straight to the display</text>
 
-  <rect x="610" y="150" width="250" height="120" rx="12" fill="#2563EB"/>
-  <text x="735" y="186" text-anchor="middle" class="t h">Service bundles</text>
-  <text x="735" y="212" text-anchor="middle" class="t s">weather · news · wifi · matter</text>
-  <text x="735" y="234" text-anchor="middle" class="t s">dashboard, the bridge to the screen</text>
-  <text x="735" y="256" text-anchor="middle" class="t s">Rust, one APEX, one process each</text>
+  <rect x="670" y="166" width="310" height="130" rx="12" fill="#2563EB"/>
+  <text x="825" y="200" text-anchor="middle" class="t h">Service bundles</text>
+  <text x="825" y="228" text-anchor="middle" class="t s">weather · news · wifi · matter</text>
+  <text x="825" y="250" text-anchor="middle" class="t s">dashboard, the bridge to the screen</text>
+  <text x="825" y="272" text-anchor="middle" class="t s">Rust, one APEX, one process each</text>
 
   <!-- agents -->
-  <rect x="340" y="290" width="520" height="90" rx="12" fill="#64748B"/>
-  <text x="600" y="326" text-anchor="middle" class="t h">SDV agents</text>
-  <text x="600" y="352" text-anchor="middle" class="t s">registry · orchestration · lifecycle · service discovery · topics · RPC</text>
-  <text x="600" y="371" text-anchor="middle" class="t s">find, start, connect and restart the bundles, here and on other devices</text>
+  <rect x="340" y="316" width="640" height="96" rx="12" fill="#64748B"/>
+  <text x="660" y="348" text-anchor="middle" class="t h">SDV agents</text>
+  <text x="660" y="374" text-anchor="middle" class="t s">registry · orchestration · lifecycle · service discovery · topics · RPC</text>
+  <text x="660" y="396" text-anchor="middle" class="t s">find, start, connect and restart the bundles, here and on other devices</text>
+
+  <!-- updates -->
+  <rect x="340" y="432" width="640" height="104" rx="12" fill="#334155" stroke="#F59E0B" stroke-width="2"/>
+  <text x="660" y="466" text-anchor="middle" class="t h">A/B updates with rollback</text>
+  <text x="660" y="494" text-anchor="middle" class="t s">the whole system in two slots, the bundles as staged APEXes</text>
+  <text x="660" y="516" text-anchor="middle" class="t s">SDV Update Manager: atomic, rolled back when the new one does not boot</text>
 
   <!-- android core -->
-  <rect x="340" y="400" width="520" height="90" rx="12" fill="#475569"/>
-  <text x="600" y="436" text-anchor="middle" class="t h">Android core, kept as it is</text>
-  <text x="600" y="462" text-anchor="middle" class="t s">Linux kernel (GKI) · init · SELinux · APEX · verified boot · keystore · HALs</text>
-  <text x="600" y="481" text-anchor="middle" class="t s">A/B updates with rollback, staged APEXes: Android's own update path</text>
+  <rect x="340" y="556" width="640" height="80" rx="12" fill="#475569"/>
+  <text x="660" y="588" text-anchor="middle" class="t h">Android core, kept as it is</text>
+  <text x="660" y="614" text-anchor="middle" class="t s">Linux kernel (GKI) · init · SELinux · APEX · verified boot · keystore · HALs</text>
 
   <!-- hardware -->
-  <rect x="340" y="510" width="520" height="90" rx="12" fill="#1E293B"/>
-  <text x="600" y="546" text-anchor="middle" class="t h">Hardware</text>
-  <text x="600" y="572" text-anchor="middle" class="t s">bare metal, no hypervisor: any board, with or without a screen</text>
-  <text x="600" y="591" text-anchor="middle" class="t s">Qualcomm RB3 (reference) · Cuttlefish emulator · Raspberry Pi</text>
+  <rect x="340" y="656" width="640" height="96" rx="12" fill="#1E293B"/>
+  <text x="660" y="688" text-anchor="middle" class="t h">Hardware</text>
+  <text x="660" y="714" text-anchor="middle" class="t s">bare metal, no hypervisor: any board, with or without a screen</text>
+  <text x="660" y="736" text-anchor="middle" class="t s">Qualcomm RB3 (reference) · Cuttlefish emulator · Raspberry Pi</text>
 
   <!-- right column: around it -->
-  <rect x="900" y="50" width="260" height="80" rx="12" fill="#0D9488"/>
-  <text x="1030" y="84" text-anchor="middle" class="t h">Designers</text>
-  <text x="1030" y="110" text-anchor="middle" class="t s">work in Figma, nothing else</text>
+  <rect x="1020" y="50" width="260" height="96" rx="12" fill="#0D9488"/>
+  <text x="1150" y="90" text-anchor="middle" class="t h">Designers</text>
+  <text x="1150" y="118" text-anchor="middle" class="t s">work in Figma, nothing else</text>
 
-  <rect x="900" y="150" width="260" height="55" rx="12" fill="#0D9488"/>
-  <text x="1030" y="177" text-anchor="middle" class="t h">Internet</text>
-  <text x="1030" y="196" text-anchor="middle" class="t s">weather, news, over TLS</text>
+  <rect x="1020" y="166" width="260" height="60" rx="12" fill="#0D9488"/>
+  <text x="1150" y="193" text-anchor="middle" class="t h">Internet</text>
+  <text x="1150" y="215" text-anchor="middle" class="t s">weather, news, over TLS</text>
 
-  <rect x="900" y="215" width="260" height="55" rx="12" fill="#0D9488"/>
-  <text x="1030" y="242" text-anchor="middle" class="t h">Devices in the house</text>
-  <text x="1030" y="261" text-anchor="middle" class="t s">extendable bundles (Matter, ...)</text>
+  <rect x="1020" y="236" width="260" height="60" rx="12" fill="#0D9488"/>
+  <text x="1150" y="263" text-anchor="middle" class="t h">Devices in the house</text>
+  <text x="1150" y="285" text-anchor="middle" class="t s">extendable bundles (Matter, ...)</text>
 
-  <rect x="900" y="290" width="260" height="90" rx="12" fill="#0D9488"/>
-  <text x="1030" y="326" text-anchor="middle" class="t h">Other SDV devices</text>
-  <text x="1030" y="352" text-anchor="middle" class="t s">one mesh: a service runs here or there,</text>
-  <text x="1030" y="371" text-anchor="middle" class="t s">the screen does not care which</text>
+  <rect x="1020" y="316" width="260" height="96" rx="12" fill="#0D9488"/>
+  <text x="1150" y="348" text-anchor="middle" class="t h">Other SDV devices</text>
+  <text x="1150" y="374" text-anchor="middle" class="t s">a service runs here or there,</text>
+  <text x="1150" y="396" text-anchor="middle" class="t s">the screen does not care which</text>
+
+  <rect x="1020" y="432" width="260" height="104" rx="12" fill="#0D9488"/>
+  <text x="1150" y="466" text-anchor="middle" class="t h">Update server</text>
+  <text x="1150" y="494" text-anchor="middle" class="t s">the maker's OTA backend:</text>
+  <text x="1150" y="516" text-anchor="middle" class="t s">new system and bundle versions</text>
 
   <!-- arrows -->
-  <line x1="900" y1="90" x2="862" y2="90" stroke="#8a93a3" stroke-width="2" marker-end="url(#a)"/>
-  <line x1="862" y1="177" x2="898" y2="177" stroke="#8a93a3" stroke-width="2" marker-start="url(#a)" marker-end="url(#a)"/>
-  <line x1="862" y1="242" x2="898" y2="242" stroke="#8a93a3" stroke-width="2" marker-start="url(#a)" marker-end="url(#a)"/>
-  <line x1="862" y1="335" x2="898" y2="335" stroke="#8a93a3" stroke-width="2" marker-start="url(#a)" marker-end="url(#a)"/>
+  <line x1="1020" y1="98" x2="982" y2="98" stroke="#8a93a3" stroke-width="2" marker-end="url(#a)"/>
+  <line x1="982" y1="196" x2="1018" y2="196" stroke="#8a93a3" stroke-width="2" marker-start="url(#a)" marker-end="url(#a)"/>
+  <line x1="982" y1="266" x2="1018" y2="266" stroke="#8a93a3" stroke-width="2" marker-start="url(#a)" marker-end="url(#a)"/>
+  <line x1="982" y1="364" x2="1018" y2="364" stroke="#8a93a3" stroke-width="2" marker-start="url(#a)" marker-end="url(#a)"/>
+  <line x1="1020" y1="484" x2="982" y2="484" stroke="#8a93a3" stroke-width="2" marker-end="url(#a)"/>
   <!-- legend -->
-  <rect x="340" y="628" width="14" height="14" rx="3" fill="#2563EB"/>
-  <rect x="358" y="628" width="14" height="14" rx="3" fill="#7C3AED"/>
-  <text x="380" y="640" class="g gs">EveryWare: the design and its tools, the UI library, the apps, the bundles, the device product</text>
-  <rect x="340" y="652" width="14" height="14" rx="3" fill="#64748B"/>
-  <rect x="358" y="652" width="14" height="14" rx="3" fill="#1E293B"/>
-  <text x="380" y="664" class="g gs">AOSP and the board: harry (plus the panel's commits), the SDV agents, the Android core, the hardware</text>
+  <rect x="340" y="772" width="14" height="14" rx="3" fill="#2563EB"/>
+  <rect x="358" y="772" width="14" height="14" rx="3" fill="#7C3AED"/>
+  <text x="380" y="785" class="g gs">EveryWare: the design and its tools, the UI library, the apps, the bundles, the device product</text>
+  <rect x="340" y="796" width="14" height="14" rx="3" fill="#64748B"/>
+  <rect x="358" y="796" width="14" height="14" rx="3" fill="#334155" stroke="#F59E0B" stroke-width="1.5"/>
+  <rect x="376" y="796" width="14" height="14" rx="3" fill="#1E293B"/>
+  <text x="398" y="809" class="g gs">AOSP and the board: harry (plus the panel's commits), the SDV agents, updates, the Android core, the hardware</text>
 </svg>
