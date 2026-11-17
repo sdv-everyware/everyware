@@ -31,6 +31,9 @@ use crate::events::{self, EVENTS_URL};
 use everyware_catalog::calendar::{Agenda, CalendarLink, Rsvp};
 use everyware_catalog::calendar_service::{CalendarDelete, CalendarFailure, CalendarRespond, CalendarResult};
 use serde_json::Value;
+use std::time::Duration;
+use tokio::sync::oneshot;
+use tokio::time::timeout;
 
 /// The only caller: the dashboard bundle (bundles/dashboard/apex, its service bundles manifest).
 const CALLER_PACKAGE: &str = "com.everyware.dashboard";
@@ -78,6 +81,60 @@ impl Failure {
 
     fn gone(why: impl Into<String>) -> Failure {
         Failure::new(CalendarFailure::CALENDAR_FAILURE_GONE, why)
+    }
+}
+
+/// Where the answer to what the screen asked goes, on the bundle's loop's side: first the word
+/// that the loop took it, then the answer. The service's side waits for both (`Waiting`).
+pub struct Reply {
+    taken: Option<oneshot::Sender<()>>,
+    result: oneshot::Sender<CalendarResult>,
+}
+
+/// The service's side of a `Reply`.
+pub struct Waiting {
+    took: oneshot::Receiver<()>,
+    answer: oneshot::Receiver<CalendarResult>,
+}
+
+impl Reply {
+    /// A reply and what waits for it.
+    pub fn new() -> (Reply, Waiting) {
+        let (taken, took) = oneshot::channel();
+        let (result, answer) = oneshot::channel();
+        (Reply { taken: Some(taken), result }, Waiting { took, answer })
+    }
+
+    /// The loop takes it. False when nobody waits for it any more (the service gave up waiting
+    /// for the loop): then it is not made, so that no change is made that the screen was told
+    /// failed.
+    pub fn take(&mut self) -> bool {
+        self.taken.take().is_some_and(|taken| taken.send(()).is_ok())
+    }
+
+    /// The answer (taken first, when it was not yet).
+    pub fn send(mut self, result: CalendarResult) {
+        let _ = self.take();
+        let _ = self.result.send(result);
+    }
+}
+
+impl Waiting {
+    /// The answer: the loop takes it within `take_wait` (or it is not made: "busy, nothing was
+    /// changed"), and answers within `answer_wait` from the moment it took it, so a slow read the
+    /// loop was in does not eat the time of the change.
+    pub async fn answer(self, take_wait: Duration, answer_wait: Duration) -> CalendarResult {
+        let again = |why: &str| result(&Err(Failure::again(why)));
+        // dropped when this gives up: the loop then does not make it (Reply::take)
+        match timeout(take_wait, self.took).await {
+            Ok(Ok(())) => {}
+            Ok(Err(_)) => return again("the calendar stopped"),
+            Err(_) => return again("the calendar is busy; nothing was changed"),
+        }
+        match timeout(answer_wait, self.answer).await {
+            Ok(Ok(answer)) => answer,
+            _ => again("no answer in time"),
+        }
     }
 }
 
@@ -450,6 +507,37 @@ mod tests {
         let long = refusal(400, format!(r#"{{"error":{{"message":"{}"}}}}"#, "x".repeat(500)).as_bytes());
         let Refusal::Failed(f) = long else { panic!() };
         assert!(result(&Err(f)).error.len() <= MAX_ERROR);
+    }
+
+    const SHORT: Duration = Duration::from_millis(100);
+
+    #[tokio::test]
+    async fn a_change_the_loop_does_not_take_in_time_is_not_made() {
+        let (mut reply, waiting) = Reply::new();
+        let answer = waiting.answer(SHORT, SHORT).await;
+        assert_eq!((answer.ok, answer.failure.enum_value_or_default(), answer.error.as_str()), (false, CalendarFailure::CALENDAR_FAILURE_AGAIN, "the calendar is busy; nothing was changed"));
+        assert!(!reply.take(), "nobody waits: the loop does not make it");
+    }
+
+    #[tokio::test]
+    async fn the_time_for_the_answer_starts_when_the_loop_takes_it() {
+        let (mut reply, waiting) = Reply::new();
+        let service = tokio::spawn(waiting.answer(SHORT * 4, SHORT * 4));
+        // the loop is busy for most of the first wait, then takes it and needs most of the second
+        tokio::time::sleep(SHORT * 3).await;
+        assert!(reply.take());
+        tokio::time::sleep(SHORT * 3).await;
+        reply.send(result(&Ok(())));
+        assert!(service.await.unwrap().ok, "the change Google made is answered as made");
+        // taken, and no answer in time
+        let (mut reply, waiting) = Reply::new();
+        assert!(reply.take());
+        let answer = waiting.answer(SHORT, SHORT).await;
+        assert_eq!(answer.error, "no answer in time");
+        // an answer without a take (no account: refused at once) goes through
+        let (reply, waiting) = Reply::new();
+        reply.send(result(&Err(Failure::new(CalendarFailure::CALENDAR_FAILURE_NOT_LINKED, "no account"))));
+        assert_eq!(waiting.answer(SHORT, SHORT).await.failure.enum_value_or_default(), CalendarFailure::CALENDAR_FAILURE_NOT_LINKED);
     }
 
     #[test]

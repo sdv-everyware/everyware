@@ -19,9 +19,10 @@ panel to a Google account the way Home Assistant does, reads the next seven days
 account's primary calendar every minute and publishes them on the topic `agenda`
 (`catalog/calendar.proto`, `catalog/everyware.vsidl`), together with the state of the link. The
 screen gets it through the dashboard bundle (`IScreenLink.publishAgenda`) and shows the agenda,
-or the QR code of the setup page while no account is linked. When the owner gave the panel write
-access, the bundle also serves `CalendarService` (`catalog/calendar_service.proto`): the screen
-answers invitations and deletes the account's own events through it.
+or the QR code of the setup page while no account is linked. The bundle also serves
+`CalendarService` (`catalog/calendar_service.proto`): through it the screen unlinks the account,
+and, when the owner gave the panel write access, answers invitations and deletes the account's
+own events (without it those are answered `READ_ONLY`).
 
 ```mermaid
 flowchart LR
@@ -98,6 +99,7 @@ page asks for the choice once more.
 | the order | Google's (`orderBy=startTime`): by start in the calendar's time zone, an all-day event at the start of its day there. The bundle does not sort again: an all-day event's 00:00 UTC is 19:00 the day before in New York, so sorted by it Tuesday's holiday would come before Monday's dinner |
 | `oauth-client.json` | the owner's OAuth client, Google's downloaded JSON; put there by `scripts/calendar-client.sh`; never in git or in the image |
 | `grant.json` | the client's id, the refresh token and the granted scopes, mode 0600 |
+| `grants-replaced.json` | the grants of OAuth clients the owner replaced, until Google ended them, mode 0600 |
 | `agenda.pb` | the last agenda, mode 0600 (titles, places, the account's address), published again at the next start |
 | `setup-url` | while the setup page is open: its URL with the one-time token, mode 0600, for the development flow |
 
@@ -189,8 +191,14 @@ reads the calendar at once and publishes the new agenda, then answers (`Calendar
 | no network, 429, 5xx, a quota, 412 twice, no answer within 40 s | `AGAIN` |
 | no account, the grant revoked | `NOT_LINKED` |
 
-A 401 renews the access token once. A change waits in a queue of four at most; the service
-answers within 80 s ("no answer in time" otherwise), the dashboard bundle waits 90 s.
+A 401 renews the access token once. A change waits in a queue of four at most. The loop takes it
+within 70 s (it may be in a read of the agenda), or it is not made at all and the answer is
+`AGAIN` ("the calendar is busy; nothing was changed"): a change the screen was told failed is
+never made later. From the moment the loop takes it the answer comes within 65 s: the change
+within 40 s, the read of the agenda after it within 20 s (a later read goes on without holding the
+answer back: the next one brings the agenda). The dashboard bundle waits 150 s, the panel 160 s.
+A change whose 40 s run out is answered `AGAIN` although Google may have made it; the next read
+shows what Google has.
 
 ## Unlinking the account
 
@@ -211,8 +219,10 @@ account stays linked and the answer is `AGAIN`. Without an account the answer is
 The panel also ends the grants it does not keep, so that none stays among the account's
 third-party access with nobody holding it: on the setup page an exchange whose consent left out
 the calendar, one without a refresh token, and the second of two sign-ins at the same time; and
-before the setup page, the grant of an OAuth client the owner replaced (it is useless with the new
-client; when Google cannot be told it stays for the next start).
+the grants of an OAuth client the owner replaced (useless with the new client). Those are moved
+out of `grant.json` into `grants-replaced.json` (0600, eight at most) before anything else, so a
+new link cannot overwrite one before Google ended it; each is ended at Google at every pass of
+the bundle's loop and at every start until Google was told, then forgotten.
 
 ## Development without the relay page
 
@@ -362,7 +372,10 @@ state, so the relay page sends the phone back to the same one.
   PIN, a document link. It goes to the shared screen as plain text only (HTML made text in the
   bundle, in linear time: a crafted description costs its length), and the screen shows it only
   when someone taps the event. The meeting link is https only; a private or confidential event
-  has neither.
+  has neither. The meeting link is the organizer's choice (a third-party conference may carry
+  any https address): the panel shows it as text, and as a QR code only after a tap on Join on
+  phone, with the host the phone will open under the code ("Opens meet.google.com"), and only for
+  a host of plain ASCII letters, digits, dots and dashes.
 - A private or confidential event is "Busy" without its place: the panel is seen by everyone in
   the room. The calendar's title of a primary calendar is the account's address; the screen
   decides whether it shows it.
@@ -385,7 +398,8 @@ state, so the relay page sends the phone back to the same one.
     once, the network, a revoked grant, a read-only answer making the grant read only (0600);
   - the unlink: the grant ended at Google before it is forgotten, not connected after a restart,
     the account kept when Google cannot be told; the grants the panel does not keep ended (a
-    consent without the calendar, no refresh token, a second sign-in, a replaced client's grant);
+    consent without the calendar, no refresh token, a second sign-in); a replaced client's grant
+    set aside so that a new link cannot overwrite it, kept until it is ended (at most eight);
     the revocation endpoint's answers (`invalid_token` counts as ended);
   - the access: the scopes asked for per choice, the scope Google granted (read, change, neither),
     the granted scope kept with the grant and taken from a refresh, an old grant read only, no

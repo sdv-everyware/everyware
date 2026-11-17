@@ -46,6 +46,11 @@ const MAX_CLIENT_FILE: usize = 16 * 1024;
 /// The linked account's refresh token (0600).
 pub const GRANT_FILE: &str = "grant.json";
 const MAX_GRANT_FILE: usize = 4 * 1024;
+/// The grants of OAuth clients the owner replaced, not ended at Google yet (0600): out of
+/// `GRANT_FILE`, so that a new link cannot overwrite them before they are revoked.
+pub const REPLACED_FILE: &str = "grants-replaced.json";
+/// Replaced grants kept aside, at most (the oldest goes first).
+const MAX_REPLACED: usize = 8;
 /// The last agenda (0600: titles, places, the account's address), published again at the next
 /// start until the first new read.
 pub const LAST_AGENDA: &str = "agenda.pb";
@@ -410,10 +415,41 @@ impl Link {
         agenda
     }
 
-    /// A kept grant of another OAuth client than `client` (the owner put a new client on the
-    /// panel): useless with the new client, still good at Google until it is revoked.
-    pub fn grant_of_another_client(&self, client: &ClientConfig) -> Option<Grant> {
-        Grant::parse(&self.store.read(GRANT_FILE, MAX_GRANT_FILE)?).filter(|grant| grant.client_id != client.client_id)
+    /// The grants of OAuth clients the owner replaced, to be ended at Google: a kept grant of
+    /// another client than `client` is moved aside first (it is useless with the new client and
+    /// still good at Google), then every grant set aside, now or before, is returned.
+    pub fn set_aside_replaced(&self, client: &ClientConfig) -> Vec<Grant> {
+        let mut replaced = self.replaced();
+        let kept = self.store.read(GRANT_FILE, MAX_GRANT_FILE).and_then(|bytes| Grant::parse(&bytes));
+        if let Some(old) = kept.filter(|grant| grant.client_id != client.client_id) {
+            log::warn!("the kept grant is of another OAuth client: set aside to be ended at Google");
+            replaced.push(old);
+            // aside first, then out of grant.json: a stop in between leaves it in both, not lost
+            self.keep_replaced(&replaced);
+            self.forget_grant();
+        }
+        replaced
+    }
+
+    /// The grants still to be ended at Google; none: the file removed.
+    pub fn keep_replaced(&self, grants: &[Grant]) {
+        let grants = &grants[grants.len().saturating_sub(MAX_REPLACED)..];
+        let written = if grants.is_empty() {
+            self.store.remove(REPLACED_FILE)
+        } else {
+            let json = format!("[{}]", grants.iter().map(Grant::to_json).collect::<Vec<_>>().join(","));
+            self.store.save_private(REPLACED_FILE, json.as_bytes())
+        };
+        if let Err(err) = written {
+            log::error!("{REPLACED_FILE}: {err}");
+        }
+    }
+
+    /// The grants set aside.
+    fn replaced(&self) -> Vec<Grant> {
+        let Some(bytes) = self.store.read(REPLACED_FILE, MAX_GRANT_FILE * MAX_REPLACED) else { return Vec::new() };
+        let list: Vec<serde_json::Value> = serde_json::from_slice(&bytes).unwrap_or_default();
+        list.iter().filter_map(|v| Grant::parse(v.to_string().as_bytes())).collect()
     }
 
     /// `grant.json` removed.
@@ -970,18 +1006,34 @@ mod tests {
     }
 
     #[test]
-    fn a_grant_of_a_replaced_client_is_found_to_be_ended() {
+    fn a_replaced_client_s_grant_is_set_aside_until_it_is_ended() {
         let d = dir("replaced");
         let mut link = Link::new(Arc::new(Store::at(&d)));
         let client = link.client().unwrap();
-        assert_eq!(link.grant_of_another_client(&client), None);
+        assert_eq!(link.set_aside_replaced(&client), vec![]);
         link.linked(&grant());
-        assert_eq!(link.grant_of_another_client(&client), None, "the client's own grant");
-        let old = Grant { client_id: "id-0".into(), ..grant() };
+        assert_eq!(link.set_aside_replaced(&client), vec![], "the client's own grant stays");
+        assert!(d.join(GRANT_FILE).exists());
+        // the owner put a new client on the panel: the old grant goes aside, out of grant.json
+        let old = Grant { client_id: "id-0".into(), refresh_token: "1//old".into(), ..grant() };
         link.linked(&old);
-        assert_eq!(link.grant_of_another_client(&client), Some(old));
-        link.forget_grant();
+        assert_eq!(link.set_aside_replaced(&client), vec![old.clone()]);
         assert!(!d.join(GRANT_FILE).exists());
+        assert_eq!(mode(d.join(REPLACED_FILE)), 0o600);
+        // Google could not be told, and the owner links an account: the old grant is still aside
+        link.keep_replaced(&[old.clone()]);
+        link.linked(&grant());
+        assert_eq!(link.set_aside_replaced(&client), vec![old.clone()]);
+        assert_eq!(link.grant(&client), Some(grant()));
+        // ended at Google: forgotten
+        link.keep_replaced(&[]);
+        assert!(!d.join(REPLACED_FILE).exists());
+        assert_eq!(link.set_aside_replaced(&client), vec![]);
+        // bounded: the oldest go first
+        let many: Vec<Grant> = (0..MAX_REPLACED + 2).map(|i| Grant { client_id: format!("id-{i}"), ..grant() }).collect();
+        link.keep_replaced(&many);
+        let aside = link.set_aside_replaced(&client);
+        assert_eq!((aside.len(), aside[0].client_id.as_str()), (MAX_REPLACED, "id-2"));
     }
 
     #[test]

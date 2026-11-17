@@ -28,7 +28,7 @@
 //! and their outcomes, `change` the changes, `server` the setup page), which has the host test.
 
 use everyware_bundle_store::Store;
-use everyware_calendar_client::change::{self, Change, Failure};
+use everyware_calendar_client::change::{self, Change, Failure, Reply};
 use everyware_calendar_client::events::DAYS;
 use everyware_calendar_client::google::{Google, Live};
 use everyware_calendar_client::link::{agenda_of, failed, not_read, Link, Outcome, Pace, Session, CLIENT_FILE, POLL_INTERVAL, SETUP_URL_FILE};
@@ -48,7 +48,7 @@ use std::net::Ipv4Addr;
 use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use tokio::net::TcpListener;
-use tokio::sync::{mpsc, oneshot};
+use tokio::sync::mpsc;
 use tokio::time::{sleep, sleep_until, timeout};
 use tokio_util::sync::CancellationToken;
 
@@ -60,18 +60,27 @@ const SETUP_TICK: Duration = Duration::from_secs(10);
 const BIND_RETRY: Duration = Duration::from_secs(10);
 /// Changes of the screen waiting for the loop, at most: a screen sends one press at a time.
 const CHANGES_QUEUED: usize = 4;
+/// The loop takes a change within this (it may be in a read of the agenda: a renewal and a read,
+/// twice after a 401, 15 s each), or the change is not made and the answer is that the calendar
+/// is busy.
+const TAKE_WAIT: Duration = Duration::from_secs(70);
 /// A change's calls to Google (a renewal of the token, the read of the event, the change, once
-/// more after a 401 or a 412), at most; the read of the agenda after it comes on top.
+/// more after a 401 or a 412), at most.
 const CHANGE_WORK: Duration = Duration::from_secs(40);
-/// A change is answered within this, or "no answer in time"; the dashboard bundle waits longer.
-const CHANGE_ANSWER: Duration = Duration::from_secs(80);
+/// The read of the agenda after a change, at most: when it is late the answer goes without it,
+/// and the next read brings the agenda.
+const READ_AFTER_CHANGE: Duration = Duration::from_secs(20);
+/// Once the loop took a change its answer comes within this (CHANGE_WORK, READ_AFTER_CHANGE and
+/// some slack). With TAKE_WAIT that is 135 s; the dashboard bundle waits 150 s.
+const CHANGE_ANSWER: Duration = Duration::from_secs(65);
 
-/// What the screen asks of the loop, and where its answer goes.
+/// What the screen asks of the loop, and where its answer goes (change::Reply: the loop says
+/// when it takes it, the RPC's time for the answer starts there).
 enum Asked {
     /// A change of an event.
-    Change(Change, oneshot::Sender<CalendarResult>),
+    Change(Change, Reply),
     /// The unlink of the account.
-    Disconnect(oneshot::Sender<CalendarResult>),
+    Disconnect(Reply),
 }
 
 sdv::lifecycle::register_service_bundle!(CalendarServiceBundle);
@@ -173,16 +182,14 @@ impl CalendarServiceRpc {
         }
     }
 
-    /// Into the loop, and its answer.
-    async fn pass(&self, asked: impl FnOnce(oneshot::Sender<CalendarResult>) -> Asked) -> CalendarResult {
-        let (reply, answer) = oneshot::channel();
+    /// Into the loop, and its answer: the loop takes it within TAKE_WAIT (or it is not made) and
+    /// answers within CHANGE_ANSWER from then on (change::Waiting).
+    async fn pass(&self, asked: impl FnOnce(Reply) -> Asked) -> CalendarResult {
+        let (reply, waiting) = Reply::new();
         if self.changes.try_send(asked(reply)).is_err() {
             return change::result(&Err(Failure::again("the calendar is busy with other changes")));
         }
-        match timeout(CHANGE_ANSWER, answer).await {
-            Ok(Ok(result)) => result,
-            _ => change::result(&Err(Failure::again("no answer in time"))),
-        }
+        waiting.answer(TAKE_WAIT, CHANGE_ANSWER).await
     }
 }
 
@@ -218,20 +225,29 @@ async fn refuse_while(changes: &mut mpsc::Receiver<Asked>, wait: impl Future<Out
 /// A change or an unlink while no account is linked.
 fn refuse(asked: Asked) {
     let (Asked::Change(_, reply) | Asked::Disconnect(reply)) = asked;
-    let _ = reply.send(change::result(&Err(Failure::new(CalendarFailure::CALENDAR_FAILURE_NOT_LINKED, "no account is linked"))));
+    reply.send(change::result(&Err(Failure::new(CalendarFailure::CALENDAR_FAILURE_NOT_LINKED, "no account is linked"))));
 }
 
-/// The grant of a client the owner replaced: useless with the new one, still good at Google, so
-/// it is ended there and forgotten. When Google cannot be told it stays, for the next start.
+/// The grants of clients the owner replaced: useless with the new client, still good at Google.
+/// They are set aside (a new link cannot overwrite them), then ended at Google and forgotten;
+/// one Google could not be told about stays aside and is tried again at the loop's next pass
+/// and the next start.
 async fn end_replaced(link: &Link, client: &ClientConfig) {
-    let Some(old) = link.grant_of_another_client(client) else { return };
-    match Live.revoke(&old.refresh_token).await {
-        Ok(()) => {
-            info!("the grant of the replaced OAuth client is ended at Google");
-            link.forget_grant();
-        }
-        Err(err) => warn!("the grant of the replaced OAuth client could not be ended at Google ({err}); again at the next start"),
+    let replaced = link.set_aside_replaced(client);
+    if replaced.is_empty() {
+        return;
     }
+    let mut kept = Vec::new();
+    for old in replaced {
+        match Live.revoke(&old.refresh_token).await {
+            Ok(()) => info!("the grant of a replaced OAuth client is ended at Google"),
+            Err(err) => {
+                warn!("the grant of a replaced OAuth client could not be ended at Google ({err}); kept aside, tried again later");
+                kept.push(old);
+            }
+        }
+    }
+    link.keep_replaced(&kept);
 }
 
 /// The topic, and the agenda published last.
@@ -283,6 +299,7 @@ async fn handle_agenda_publisher(mut out: Output, mut link: Link, mut changes: m
         };
         no_client.clear();
         info!("OAuth client {}", client.client_id);
+        end_replaced(&link, &client).await;
         let session = match link.grant(&client) {
             Some(grant) => {
                 match kept.take() {
@@ -296,7 +313,6 @@ async fn handle_agenda_publisher(mut out: Output, mut link: Link, mut changes: m
                 Session::new(client, grant, None, Instant::now())
             }
             None => {
-                end_replaced(&link, &client).await;
                 match run_setup(&client, &link, &mut out, expired, &mut changes).await {
                     SetupEnd::Linked(grant, tokens) => {
                         expired = false;
@@ -412,10 +428,17 @@ async fn read_agenda(mut session: Session, link: &mut Link, out: &mut Output, ch
     let mut pace = Pace::default();
     let mut count = None;
     // the answer to a change, sent after the read that follows it
-    let mut answer: Option<(oneshot::Sender<CalendarResult>, CalendarResult)> = None;
+    let mut answer: Option<(Reply, CalendarResult)> = None;
     info!("reading the calendar every {} s", POLL_INTERVAL.as_secs());
     loop {
-        let wait = match session.read(&Live, link.store(), Instant::now(), unix_now()).await {
+        let read = session.read(&Live, link.store(), Instant::now(), unix_now());
+        // after a change the read is bounded: its answer must not wait for a slow network
+        let outcome = if answer.is_some() {
+            timeout(READ_AFTER_CHANGE, read).await.unwrap_or_else(|_| Outcome::Again("the read after a change took too long".into()))
+        } else {
+            read.await
+        };
+        let wait = match outcome {
             Outcome::Read(read) => {
                 // a line a minute only when the count changes
                 if count != Some(read.events.len()) {
@@ -448,15 +471,23 @@ async fn read_agenda(mut session: Session, link: &mut Link, out: &mut Output, ch
             tokio::select! {
                 () = sleep_until(next) => break,
                 Some(asked) = changes.recv() => match asked {
-                    Asked::Change(change, reply) => {
+                    Asked::Change(change, mut reply) => {
+                        if !reply.take() {
+                            info!("{change:?}: nobody waits for it any more, not made");
+                            continue;
+                        }
                         let (result, read_now) = make(&mut session, link, out.last.as_ref(), &change).await;
                         if read_now {
                             answer = Some((reply, result));
                             break;
                         }
-                        let _ = reply.send(result);
+                        reply.send(result);
                     }
-                    Asked::Disconnect(reply) => {
+                    Asked::Disconnect(mut reply) => {
+                        if !reply.take() {
+                            info!("an unlink nobody waits for any more, not made");
+                            continue;
+                        }
                         let outcome = timeout(CHANGE_WORK, session.disconnect(&Live)).await.unwrap_or_else(|_| Err(Failure::again("Google did not answer in time")));
                         let unlinked = outcome.is_ok();
                         match &outcome {
@@ -466,7 +497,7 @@ async fn read_agenda(mut session: Session, link: &mut Link, out: &mut Output, ch
                             }
                             Err(failure) => warn!("the account is not unlinked: {}", failure.why),
                         }
-                        let _ = reply.send(change::result(&outcome));
+                        reply.send(change::result(&outcome));
                         if unlinked {
                             return Ended::Disconnected;
                         }
@@ -478,9 +509,9 @@ async fn read_agenda(mut session: Session, link: &mut Link, out: &mut Output, ch
 }
 
 /// The answer to a change, if one waits.
-fn send(answer: Option<(oneshot::Sender<CalendarResult>, CalendarResult)>) {
+fn send(answer: Option<(Reply, CalendarResult)>) {
     if let Some((reply, result)) = answer {
-        let _ = reply.send(result);
+        reply.send(result);
     }
 }
 

@@ -50,9 +50,9 @@ const WIFI_CALL_TIMEOUT: Duration = Duration::from_secs(40);
 /// The deadline of a MatterService call: a pairing is answered within the Matter bundle's
 /// 150 s, a device command within its 20 s.
 const MATTER_CALL_TIMEOUT: Duration = Duration::from_secs(160);
-/// The deadline of a CalendarService call: the calendar bundle answers within 80 s (Google's
-/// answers, then the read of the agenda).
-const CALENDAR_CALL_TIMEOUT: Duration = Duration::from_secs(90);
+/// The deadline of a CalendarService call: the calendar bundle takes a change within 70 s and
+/// answers within 65 s from then on (Google's answers, then the read of the agenda).
+const CALENDAR_CALL_TIMEOUT: Duration = Duration::from_secs(150);
 
 type Agenda = everyware_catalog::calendar::Agenda;
 type News = everyware_catalog::news::NewsFeed;
