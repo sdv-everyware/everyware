@@ -10,7 +10,7 @@
 // so a patch can live in any repository and needs no path to this folder. Before the patch the message is encoded again unchanged and compared
 // with the original, so a schema the reader does not understand stops here and not in Figma.
 // The output keeps the input's zip entries and their order. The output is a build product: the
-// projects' build scripts write it into their design/build/ (not in git) and write it again.
+// projects' build scripts write the result into their design/ (in git, rewritten when its content changes).
 //
 // Needs node, unzip and zip; the kiwi format comes with it (third_party/kiwi-schema).
 const fs = require('fs'), os = require('os'), path = require('path'), zlib = require('zlib'), { execFileSync } = require('child_process');

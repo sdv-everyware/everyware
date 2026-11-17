@@ -26,19 +26,20 @@ Smart HOme.fig ──build──►│      (the contract: #names, component set
 
 ```bash
 # WHAT: build the panel from the designer's export (design/source/Smart HOme.fig) into
-#       design/build/smarthome.fig, a build output; --dcf also writes data/smarthome.dcf
+#       design/smarthome.fig (in git, rewritten only when its content changes); --dcf also
+#       writes data/smarthome.dcf
 # from the tree's top
 SA=packages/services/display_safety/utils/smarthome-app
 $SA/design/build.sh
 # WHAT: read it back and check it (read only); fails on an overlap, a missing name, a designer frame in the root
-CHECK_NAMES=#device/card,#home/tabs vendor/sdv-everyware/everyware/design/figma/check-figma.sh $SA/design/build/smarthome.fig
+CHECK_NAMES=#device/card,#home/tabs vendor/sdv-everyware/everyware/design/figma/check-figma.sh $SA/design/smarthome.fig
 ```
 
 **Always give the user the built .fig for a review.** After every design build, in your reply:
 the full absolute path of the built file (the build script prints it as its last line, `review in
 Figma (File > Import): ...`), what changed in it, and where to look (the frame or the set's name).
 Not a bare file name, not a path relative to the repository.
-For the panel: `<tree>/packages/services/display_safety/utils/smarthome-app/design/build/smarthome.fig`.
+For the panel: `<tree>/packages/services/display_safety/utils/smarthome-app/design/smarthome.fig`.
 
 The chain (smarthome-app's `design/build.sh`, in this order): ui-lib's `design/components-patch.js`
 (the Library: component sets, from ui-lib/components.json), then smarthome-app's `design/`: keyboard-patch.js (the Wi-Fi sheet and the keyboard dock),
@@ -47,10 +48,11 @@ Rooms, Automations), sheet-patch.js (the device sheet), panel-patch.js, prototyp
 designer's frames and the prototype, always last). A new screen or sheet of the panel is a new patch in
 smarthome-app's `design/` and the chain, or a section of the patch it belongs to; the designer's part goes into prototype-patch.js.
 
-Every build writes `design/build/smarthome.fig` again (not in git: it is built from the patches
-and `design/source/`). The user can import it into Figma to look at it; a new export from the
-designer replaces `design/source/Smart HOme.fig` in a commit. Only the .dcf is committed; a fetch
-from Figma keeps its file key local (`scripts/figma-key`, git-ignored).
+Every build writes `design/smarthome.fig`, the panel's whole design, built from the patches and
+`design/source/`; it is in git and committed with the change that alters it, as the .dcf is
+(`design/build/` keeps the steps between, not in git). The user can import it into Figma to
+look at it; a new export from the designer replaces `design/source/Smart HOme.fig` in a commit.
+A fetch from Figma keeps its file key local (`scripts/figma-key`, git-ignored).
 
 ### The .dcf without Figma
 
@@ -62,7 +64,7 @@ goes through the fetch.
 ```bash
 # WHAT: the app's .dcf from a built .fig (default output: smarthome-app/data/smarthome.dcf,
 #       the previous one kept next to it with its time)
-vendor/sdv-everyware/everyware/scripts/fig-to-dcf.sh $SA/design/build/smarthome.fig $SA/data/smarthome.dcf    # or: $SA/design/build.sh --dcf
+vendor/sdv-everyware/everyware/scripts/fig-to-dcf.sh $SA/design/smarthome.fig $SA/data/smarthome.dcf    # or: $SA/design/build.sh --dcf
 # the root is #<out's name>-root (tv.dcf -> #tv-root); DCF_CHECK: the names that must be in the result
 DCF_CHECK='#tv-root #tv/time' \
     vendor/sdv-everyware/everyware/scripts/fig-to-dcf.sh "<file.fig>" <out.dcf>

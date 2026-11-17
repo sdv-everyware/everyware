@@ -74,8 +74,8 @@ Where the designs are:
 
 | Project | Folder | Builds |
 |---|---|---|
-| The Library | `vendor/sdv-everyware/ui-lib/design` | `build-library.sh` → `design/build/library.fig` |
-| The panel (smarthome-app) | `utils/smarthome-app/design` | `build.sh` → `design/build/smarthome.fig` (`--dcf`: and `data/smarthome.dcf`) |
+| The Library | `vendor/sdv-everyware/ui-lib/design` | `build-library.sh` → `design/library.fig` |
+| The panel (smarthome-app) | `utils/smarthome-app/design` | `build.sh` → `design/smarthome.fig` (`--dcf`: and `data/smarthome.dcf`) |
 | An app (hub, tv, pairs, a new one) | `utils/<app>-app/design` | `build.sh` → the Library, then `design/<app>.fig` (in git, the designer's file) and `data/<app>.dcf` |
 
 ## How a .fig is built
@@ -84,9 +84,9 @@ Where the designs are:
 flowchart TB
   X["smarthome-app/design/source/<br/>Smart HOme.fig (the designer's export)"]
   X -->|"empty-patch.js, once<br/>build-library.sh --base"| B["ui-lib/design/library-base.fig<br/>pages + icon sources"]
-  B -->|components-patch.js| LIB["ui-lib design/build/library.fig"]
+  B -->|components-patch.js| LIB["ui-lib design/library.fig"]
   LIB -->|"&lt;app&gt;-patch.js"| AL["&lt;app&gt; light .fig"] -->|dark-theme-patch.js| AF["&lt;app&gt;-app design/&lt;app&gt;.fig"] -->|fig-to-dcf.sh| AD["data/&lt;app&gt;.dcf"]
-  X -->|components-patch.js| P1 -->|"keyboard, dashboard, screens,<br/>sheet, panel, prototype"| PF["smarthome-app design/build/smarthome.fig"]
+  X -->|components-patch.js| P1 -->|"keyboard, dashboard, screens,<br/>sheet, panel, prototype"| PF["smarthome-app design/smarthome.fig"]
   P1["panel steps<br/>(smarthome-app design/build.sh)"]
 ```
 
@@ -196,7 +196,7 @@ U=packages/services/display_safety/utils
 
 # an app: the Library, the app's .fig and its .dcf in one step (CHECK: names that must be in it)
 CHECK='#pairs/time #pairs/cards' $U/pairs-app/design/build.sh
-#   -> vendor/sdv-everyware/ui-lib/design/build/library.fig
+#   -> vendor/sdv-everyware/ui-lib/design/library.fig
 #   -> $U/pairs-app/design/pairs.fig      (open in Figma to look at it)
 #   -> $U/pairs-app/data/pairs.dcf              (committed, the app loads it)
 
@@ -205,7 +205,7 @@ vendor/sdv-everyware/ui-lib/design/build-library.sh
 
 # the panel and its checks
 $U/smarthome-app/design/build.sh            # --dcf: and data/smarthome.dcf
-$FIGMA/check-figma.sh $U/smarthome-app/design/build/smarthome.fig     # read only
+$FIGMA/check-figma.sh $U/smarthome-app/design/smarthome.fig     # read only
 
 # one step by hand, or a .fig as JSON to look at it or compare two builds
 node $FIGMA/roundtrip.js <in.fig> <out.fig> <patch.js>
