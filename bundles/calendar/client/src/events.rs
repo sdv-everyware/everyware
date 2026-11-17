@@ -13,10 +13,12 @@
 //! The Calendar API's Events:list of the primary calendar, read for the agenda: the next seven
 //! days, recurring events as their occurrences, in Google's order (by start in the calendar's
 //! time zone), with only the fields the agenda needs, without the invitations the owner declined.
+//! Each event says what the screen may change of it (`may_respond`, `may_delete`: the rule the
+//! changes check again, change.rs).
 //! <https://developers.google.com/workspace/calendar/api/v3/reference/events/list>
 
 use crate::time::{self, DAY};
-use everyware_catalog::calendar::AgendaEvent;
+use everyware_catalog::calendar::{AgendaEvent, Rsvp};
 use serde_json::Value;
 
 /// Events:list of the account's primary calendar.
@@ -26,9 +28,10 @@ pub const DAYS: i64 = 7;
 /// The events of an agenda, at most (the catalog's bound).
 pub const MAX_EVENTS: usize = 40;
 /// Only what the agenda needs; of the attendees only the account's own answer (with
-/// `maxAttendees=1` Google lists only the account itself).
-pub const FIELDS: &str =
-    "summary,items(id,status,summary,location,visibility,colorId,start,end,attendees(self,responseStatus),description,hangoutLink,conferenceData(entryPoints(entryPointType,uri)))";
+/// `maxAttendees=1` Google lists only the account itself), of the organizer whether it is the
+/// account.
+pub const FIELDS: &str = "summary,items(id,status,summary,location,visibility,colorId,start,end,attendees(self,responseStatus),organizer(self),\
+     recurringEventId,eventType,description,hangoutLink,conferenceData(entryPoints(entryPointType,uri)))";
 /// The title of a private or confidential event.
 pub const BUSY: &str = "Busy";
 /// The catalog's bounds (catalog/calendar.proto), in bytes.
@@ -53,6 +56,13 @@ pub struct Read {
     pub calendar: String,
     /// Its events from now on, in Google's order, at most `MAX_EVENTS`.
     pub events: Vec<AgendaEvent>,
+}
+
+/// Whether `id` is an event id as Google writes them (base32hex, an occurrence's `_` and its
+/// time, `20261116T080000Z`), within the catalog's bound: only such an id goes into a URL of a
+/// change. A longer one is cut in the agenda and cannot be changed.
+pub fn valid_id(id: &str) -> bool {
+    !id.is_empty() && id.len() <= MAX_ID && id.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-')
 }
 
 /// Why a read failed.
@@ -106,22 +116,76 @@ pub async fn read(token: &str, now: i64) -> Result<Read, ApiError> {
 /// An answer of the API that is not a success, by its status and its error's reasons
 /// (`{"error": {"message", "errors": [{"reason"}], "details": [{"reason"}]}}`).
 pub fn api_error(status: u16, body: &[u8]) -> ApiError {
-    let v: Value = serde_json::from_slice(body).unwrap_or_default();
-    let error = &v["error"];
-    let message = format!("Events:list: HTTP {status} {}", text(error["message"].as_str().unwrap_or(""), 160));
-    let reasons: Vec<&str> = ["errors", "details"]
-        .iter()
-        .filter_map(|key| error[*key].as_array())
-        .flatten()
-        .filter_map(|e| e["reason"].as_str())
-        .collect();
-    let has = |names: &[&str]| reasons.iter().any(|r| names.contains(r));
+    let (message, reasons) = error_of(body);
+    let message = format!("Events:list: HTTP {status} {}", text(&message, 160));
+    let has = |names: &[&str]| reasons.iter().any(|r| names.contains(&r.as_str()));
     match status {
         401 => ApiError::Unauthorized,
         403 if has(&["accessNotConfigured", "SERVICE_DISABLED"]) => ApiError::Disabled(message),
         403 if has(&["insufficientPermissions", "ACCESS_TOKEN_SCOPE_INSUFFICIENT"]) => ApiError::Scope(message),
         _ => ApiError::Other(message),
     }
+}
+
+/// The message and the reasons of an error of the API (`{"error": {"message", "errors":
+/// [{"reason"}], "details": [{"reason"}]}}`); empty for a body that is not one.
+pub fn error_of(body: &[u8]) -> (String, Vec<String>) {
+    let v: Value = serde_json::from_slice(body).unwrap_or_default();
+    let error = &v["error"];
+    let reasons = ["errors", "details"].iter().filter_map(|key| error[*key].as_array()).flatten().filter_map(|e| e["reason"].as_str()).map(str::to_string).collect();
+    (error["message"].as_str().unwrap_or("").to_string(), reasons)
+}
+
+/// An event the panel shows without its details: private or confidential.
+pub fn private(item: &Value) -> bool {
+    matches!(item["visibility"].as_str(), Some("private" | "confidential"))
+}
+
+/// An ordinary event: not a birthday, not one from Gmail, not out of office, focus time or a
+/// working location, whose changes Google limits.
+fn ordinary(item: &Value) -> bool {
+    item["eventType"].as_str().is_none_or(|t| t == "default")
+}
+
+/// The account organizes the event (the calendar the event is on is the organizer's).
+fn organizer(item: &Value) -> bool {
+    item["organizer"]["self"] == true
+}
+
+/// The account's own attendee entry, if it is a guest.
+pub fn own_attendee(item: &Value) -> Option<&Value> {
+    item["attendees"].as_array()?.iter().find(|a| a["self"] == true)
+}
+
+/// Google's responseStatus as the catalog's answer, and back.
+pub fn rsvp(status: &str) -> Rsvp {
+    match status {
+        "accepted" => Rsvp::RSVP_ACCEPTED,
+        "tentative" => Rsvp::RSVP_TENTATIVE,
+        "declined" => Rsvp::RSVP_DECLINED,
+        _ => Rsvp::RSVP_NEEDS_ACTION,
+    }
+}
+
+/// The account's answer: its attendee's, unless it is the organizer (an organizer has an attendee
+/// entry too, "accepted") or no guest at all.
+fn response(item: &Value) -> Rsvp {
+    match own_attendee(item) {
+        Some(own) if !organizer(item) => rsvp(own["responseStatus"].as_str().unwrap_or("")),
+        _ => Rsvp::RSVP_NONE,
+    }
+}
+
+/// The screen may answer the invitation, given write access: the account is a guest and not the
+/// organizer of an ordinary event that is not private.
+pub fn may_respond(item: &Value) -> bool {
+    ordinary(item) && !private(item) && response(item) != Rsvp::RSVP_NONE
+}
+
+/// The screen may delete the event, given write access: the account organizes the ordinary event
+/// and it is not private.
+pub fn may_delete(item: &Value) -> bool {
+    ordinary(item) && !private(item) && organizer(item)
 }
 
 /// An Events:list answer as the agenda's events: cancelled ones and the invitations the account
@@ -154,9 +218,10 @@ fn event(item: &Value) -> Option<AgendaEvent> {
         _ if all_day => start + DAY,
         _ => start,
     };
-    let private = matches!(item["visibility"].as_str(), Some("private" | "confidential"));
+    let private = private(item);
+    let id = item["id"].as_str().unwrap_or("");
     let mut e = AgendaEvent::new();
-    e.id = text(item["id"].as_str().unwrap_or(""), MAX_ID);
+    e.id = text(id, MAX_ID);
     e.title = if private { BUSY.to_string() } else { text(item["summary"].as_str().unwrap_or(""), MAX_TITLE) };
     e.location = if private { String::new() } else { text(item["location"].as_str().unwrap_or(""), MAX_LOCATION) };
     if !private {
@@ -167,6 +232,12 @@ fn event(item: &Value) -> Option<AgendaEvent> {
     e.end = end;
     e.all_day = all_day;
     e.color = item["colorId"].as_str().and_then(|c| c.parse::<usize>().ok()).and_then(|c| EVENT_COLORS.get(c.wrapping_sub(1))).copied().unwrap_or(0);
+    e.response = response(item).into();
+    e.recurring = item["recurringEventId"].as_str().is_some_and(|r| !r.is_empty());
+    // what the screen may change, given write access (Link::connected takes it away without);
+    // an id that is not Google's whole id cannot go into a change
+    e.can_respond = valid_id(id) && may_respond(item);
+    e.can_delete = valid_id(id) && may_delete(item);
     Some(e)
 }
 
@@ -554,6 +625,67 @@ mod tests {
         // private and confidential: neither
         for id in ["secret", "conf"] {
             assert_eq!((e(id).title.as_str(), e(id).description.as_str(), e(id).meeting_url.as_str()), (BUSY, "", ""), "{id}");
+        }
+    }
+
+    #[test]
+    fn what_the_screen_may_change() {
+        let list = r#"{"items": [
+            {"id": "mine", "organizer": {"self": true}, "start": {"dateTime": "2026-11-16T09:00:00Z"}},
+            {"id": "hosting", "organizer": {"self": true}, "attendees": [{"self": true, "organizer": true, "responseStatus": "accepted"}],
+             "start": {"dateTime": "2026-11-16T09:30:00Z"}},
+            {"id": "invited", "organizer": {"email": "boss@example.org"}, "attendees": [{"self": true, "responseStatus": "needsAction"}],
+             "start": {"dateTime": "2026-11-16T10:00:00Z"}},
+            {"id": "yes", "attendees": [{"self": true, "responseStatus": "accepted"}], "start": {"dateTime": "2026-11-16T10:30:00Z"}},
+            {"id": "maybe", "attendees": [{"self": true, "responseStatus": "tentative"}], "start": {"dateTime": "2026-11-16T11:00:00Z"}},
+            {"id": "weekly_20261116T113000Z", "recurringEventId": "weekly", "attendees": [{"self": true, "responseStatus": "accepted"}],
+             "start": {"dateTime": "2026-11-16T11:30:00Z"}},
+            {"id": "notaguest", "organizer": {"email": "a@example.org"}, "start": {"dateTime": "2026-11-16T12:00:00Z"}},
+            {"id": "secret", "visibility": "private", "organizer": {"self": true}, "start": {"dateTime": "2026-11-16T12:30:00Z"}},
+            {"id": "secretinvite", "visibility": "confidential", "attendees": [{"self": true, "responseStatus": "needsAction"}],
+             "start": {"dateTime": "2026-11-16T13:00:00Z"}},
+            {"id": "flight", "eventType": "fromGmail", "organizer": {"self": true}, "start": {"dateTime": "2026-11-16T13:30:00Z"}},
+            {"id": "away", "eventType": "outOfOffice", "organizer": {"self": true}, "start": {"dateTime": "2026-11-16T14:00:00Z"}},
+            {"id": "plain", "eventType": "default", "organizer": {"self": true}, "start": {"dateTime": "2026-11-16T14:30:00Z"}},
+            {"id": "{long}", "organizer": {"self": true}, "start": {"dateTime": "2026-11-16T15:00:00Z"}},
+            {"id": "bad/../id", "organizer": {"self": true}, "start": {"dateTime": "2026-11-16T15:30:00Z"}}
+        ]}"#
+        .replace("{long}", &"a".repeat(MAX_ID + 1));
+        let read = parse_events(&list).unwrap();
+        let e = |id: &str| read.events.iter().find(|e| e.id == id).unwrap().clone();
+        let what = |id: &str| {
+            let e = e(id);
+            (e.response.enum_value_or_default(), e.can_respond, e.can_delete, e.recurring)
+        };
+        use Rsvp::*;
+        // the account's own events: delete, no answer (the organizer's attendee entry is no invitation)
+        assert_eq!(what("mine"), (RSVP_NONE, false, true, false));
+        assert_eq!(what("hosting"), (RSVP_NONE, false, true, false));
+        assert_eq!(what("plain"), (RSVP_NONE, false, true, false));
+        // invitations: the answer, no delete
+        assert_eq!(what("invited"), (RSVP_NEEDS_ACTION, true, false, false));
+        assert_eq!(what("yes"), (RSVP_ACCEPTED, true, false, false));
+        assert_eq!(what("maybe"), (RSVP_TENTATIVE, true, false, false));
+        assert_eq!(what("weekly_20261116T113000Z"), (RSVP_ACCEPTED, true, false, true));
+        // neither: not a guest, private or confidential, not an ordinary event, an id that is not Google's whole id
+        assert_eq!(what("notaguest"), (RSVP_NONE, false, false, false));
+        assert_eq!(what("secret"), (RSVP_NONE, false, false, false));
+        assert_eq!(what("secretinvite"), (RSVP_NEEDS_ACTION, false, false, false));
+        assert_eq!(what("flight"), (RSVP_NONE, false, false, false));
+        assert_eq!(what("away"), (RSVP_NONE, false, false, false));
+        let long = read.events.iter().find(|e| e.id.ends_with('…')).unwrap();
+        assert!(!long.can_delete && !long.can_respond);
+        assert_eq!(what("bad/../id"), (RSVP_NONE, false, false, false));
+    }
+
+    #[test]
+    fn event_ids() {
+        let (longest, too_long) = ("a".repeat(MAX_ID), "a".repeat(MAX_ID + 1));
+        for good in ["abc123", "weekly_20261116T080000Z", "allday_20261116", "_6tlnaqrle5p6cpb4dhmj4phpehk6ap", longest.as_str()] {
+            assert!(valid_id(good), "{good}");
+        }
+        for bad in ["", "a/b", "../x", "a?b", "a#b", "a b", "a%2Fb", "ä", "a\nb", too_long.as_str()] {
+            assert!(!valid_id(bad), "{bad}");
         }
     }
 

@@ -11,8 +11,9 @@
 // limitations under the License.
 
 //! The panel's setup page on the local network, while no account is linked: what a request
-//! asks for and the answers. Two paths, GET only: `/setup?t=<one-time token>` sends the browser
-//! to Google's consent screen, `/callback?code=..&state=..` (from the relay page, or from Google
+//! asks for and the answers. Two paths, GET only: `/setup?t=<one-time token>` asks what the panel
+//! may do with the calendar (`choice`: read only, or read and change) and each answer goes on to
+//! Google's consent screen, `/callback?code=..&state=..` (from the relay page, or from Google
 //! itself on a development client) finishes the link. Anything else is refused. The bundle
 //! (src/lib.rs) owns the socket: it reads at most `MAX_REQUEST` bytes of a request's head, in
 //! time, and closes the connection after the answer.
@@ -112,18 +113,32 @@ pub fn parse(head: &[u8]) -> Result<Request, Reject> {
     }
 }
 
-/// 302 to `location` (Google's consent screen).
-pub fn redirect(location: &str) -> Vec<u8> {
-    response("302 Found", &[("Location", location)], "")
-}
-
 /// A page with one sentence: `status` ("200 OK") and `message` (escaped).
 pub fn page(status: &str, message: &str) -> Vec<u8> {
+    html(status, &format!("<p>{}</p>", escape(message)))
+}
+
+/// The choice of access, before Google's consent screen: two links, read only first (the
+/// default, and the one recommended), each the authorization request for that access.
+pub fn choice(read_url: &str, change_url: &str) -> Vec<u8> {
     let body = format!(
-        "<!doctype html><html lang=\"en\"><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><title>Calendar link</title><p>{}</p></html>\n",
-        escape(message)
+        "<h1>Link a Google Calendar</h1>\
+         <p>What may the panel do with the calendar?</p>\
+         <p><a href=\"{}\">Read only</a> (recommended)<br>The panel shows the events of the next seven days.</p>\
+         <p><a href=\"{}\">Read and change</a><br>The panel also answers invitations and deletes the account's own events. \
+         Anyone at the panel can do that.</p>\
+         <p>Google asks for your consent next. You can untick the change there.</p>",
+        escape(read_url),
+        escape(change_url)
     );
-    response(status, &[("Content-Type", "text/html; charset=utf-8")], &body)
+    html("200 OK", &body)
+}
+
+fn html(status: &str, body: &str) -> Vec<u8> {
+    let page = format!(
+        "<!doctype html><html lang=\"en\"><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><title>Calendar link</title>{body}</html>\n"
+    );
+    response(status, &[("Content-Type", "text/html; charset=utf-8")], &page)
 }
 
 /// The answer to a refused request.
@@ -243,9 +258,15 @@ mod tests {
         assert!(page.contains("<p>Done. &lt;You&gt; can close this page.</p>"));
         let (head, body) = page.split_once("\r\n\r\n").unwrap();
         assert!(head.contains(&format!("Content-Length: {}\r\n", body.len())));
-        let redirect = String::from_utf8(redirect("https://accounts.google.com/o/oauth2/v2/auth?a=b")).unwrap();
-        assert!(redirect.starts_with("HTTP/1.1 302 Found\r\nLocation: https://accounts.google.com/o/oauth2/v2/auth?a=b\r\n"));
-        assert!(redirect.ends_with("Content-Length: 0\r\nCache-Control: no-store\r\nReferrer-Policy: no-referrer\r\nX-Content-Type-Options: nosniff\r\nContent-Security-Policy: default-src 'none'\r\nConnection: close\r\n\r\n"));
+        // the choice: two links, read only first, the URLs escaped in the attribute
+        let choice = String::from_utf8(choice("https://accounts.google.com/o/oauth2/v2/auth?scope=r&a=\"x", "https://accounts.google.com/o/oauth2/v2/auth?scope=c")).unwrap();
+        assert!(choice.starts_with("HTTP/1.1 200 OK\r\n") && choice.contains("Content-Security-Policy: default-src 'none'\r\n"));
+        let read = choice.find("href=\"https://accounts.google.com/o/oauth2/v2/auth?scope=r&amp;a=&quot;x\">Read only</a>").unwrap();
+        let change = choice.find("href=\"https://accounts.google.com/o/oauth2/v2/auth?scope=c\">Read and change</a>").unwrap();
+        assert!(read < change);
+        // nothing cached, no referrer to Google (the page's URL held the token), nothing run
+        let (head, body) = choice.split_once("\r\n\r\n").unwrap();
+        assert!(head.ends_with(&format!("Content-Length: {}\r\nCache-Control: no-store\r\nReferrer-Policy: no-referrer\r\nX-Content-Type-Options: nosniff\r\nContent-Security-Policy: default-src 'none'\r\nConnection: close", body.len())), "{head}");
         assert!(String::from_utf8(reject(Reject::TooLarge)).unwrap().starts_with("HTTP/1.1 431 "));
     }
 }

@@ -13,8 +13,10 @@
 //! What the calendar asks Google, as a trait: the bundle uses `Live` (HTTPS to Google), the
 //! tests a fake that answers from a script.
 
+use crate::change::{self, ApiCall};
 use crate::events::{self, ApiError, Read};
 use crate::oauth::{self, AuthError, ClientConfig, Tokens};
+use everyware_https::Reply;
 
 /// Google's token endpoint and Calendar API.
 #[async_trait::async_trait]
@@ -25,6 +27,9 @@ pub trait Google: Send + Sync {
     async fn refresh(&self, client: &ClientConfig, refresh_token: &str) -> Result<Tokens, AuthError>;
     /// The primary calendar's events from `now` (unix time) on, with an access token.
     async fn events(&self, access_token: &str, now: i64) -> Result<Read, ApiError>;
+    /// One call of a change (change.rs), with an access token: Google's answer whatever its
+    /// status, or why there is none (the network).
+    async fn call(&self, access_token: &str, call: &ApiCall) -> Result<Reply, String>;
 }
 
 /// Google itself, over HTTPS (libs/https).
@@ -42,5 +47,9 @@ impl Google for Live {
 
     async fn events(&self, access_token: &str, now: i64) -> Result<Read, ApiError> {
         events::read(access_token, now).await
+    }
+
+    async fn call(&self, access_token: &str, call: &ApiCall) -> Result<Reply, String> {
+        everyware_https::bearer(call.method, &call.url, access_token, call.if_match.as_deref(), call.body.as_deref(), change::MAX_REPLY).await.map_err(|e| e.to_string())
     }
 }

@@ -24,6 +24,7 @@ pub enum ScreenCommand {
     Wifi(Vec<u8>),
     Matter(Vec<u8>),
     Settings(Vec<u8>),
+    Calendar(Vec<u8>),
 }
 
 /// The panel's end while it is there, and this bundle's command sink.
@@ -190,6 +191,11 @@ impl ICommandSink for Sink {
 
     fn onSettingsChange(&self, request: &[u8]) -> binder::Result<()> {
         let _ = self.commands.send(ScreenCommand::Settings(request.to_vec()));
+        Ok(())
+    }
+
+    fn onCalendarCommand(&self, command: &[u8]) -> binder::Result<()> {
+        let _ = self.commands.send(ScreenCommand::Calendar(command.to_vec()));
         Ok(())
     }
 }

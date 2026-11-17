@@ -4,7 +4,8 @@ package com.everyware.screen;
  * The dashboard bundle's end of the screen's commands (IScreenLink.subscribeCommands). The bundle
  * calls the bundle that owns the device (SDV RPC) for each and hands the answer back with
  * IScreenLink.publishWifiResult or publishMatterResult. A settings change goes to user_preferences,
- * and the applied values come back with IScreenLink.publishSettings.
+ * and the applied values come back with IScreenLink.publishSettings. A calendar change goes to the
+ * calendar bundle, and the new agenda comes back with IScreenLink.publishAgenda.
  */
 @VintfStability
 interface ICommandSink {
@@ -21,4 +22,13 @@ interface ICommandSink {
      * the new values come back with publishSettings once the group's owner applied them.
      */
     oneway void onSettingsChange(in byte[] request);
+
+    /**
+     * A change of the linked account's calendar: a com.everyware.CalendarCommand
+     * (catalog/calendar_service.proto), an answer to an invitation or the deletion of one of the
+     * account's events, for an event of the last agenda that allows it (AgendaEvent.can_respond,
+     * can_delete). A new method goes last, so a panel built before it keeps the numbers of the
+     * others.
+     */
+    oneway void onCalendarCommand(in byte[] command);
 }

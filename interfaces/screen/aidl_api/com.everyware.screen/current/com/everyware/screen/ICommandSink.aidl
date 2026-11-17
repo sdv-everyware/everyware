@@ -22,4 +22,5 @@ interface ICommandSink {
   oneway void onWifiCommand(in byte[] command);
   oneway void onMatterCommand(in byte[] command);
   oneway void onSettingsChange(in byte[] request);
+  oneway void onCalendarCommand(in byte[] command);
 }

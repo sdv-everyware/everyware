@@ -52,7 +52,7 @@ the device sheet `#device` (`#device-content`, sheet-patch.js), the panel `#pane
 | Front door | DoorLock | `lock state` | `lock`, `unlock` |
 | Wi-Fi indicator, Wi-Fi sheet | Wi-Fi (`bundles/wifi`) | `wifi-networks`, `wifi-state` | `WifiService`: `Scan`, `Connect`, `Forget`, `Disconnect` |
 | Outdoor 18° · Partly cloudy | Weather | `weather` | |
-| Agenda (right column) | Calendar (`bundles/calendar`) | `agenda` | |
+| Agenda (right column) | Calendar (`bundles/calendar`) | `agenda` | `CalendarService`: `Respond`, `Delete` (with write access) |
 | Clock | system | | |
 
 A scene shows the architecture best: "Good morning" calls Scenes, Scenes calls Lights and

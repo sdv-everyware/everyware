@@ -12,8 +12,9 @@
 
 //! The link's decisions, apart from the bundle's loop and its sleeps: what one read of the agenda
 //! gives (`Session`: the access token renewed when it is due and once more after a 401, a new
-//! refresh token kept) and what each outcome leaves in the bundle's directory and publishes
-//! (`Link`). The bundle (../../src/lib.rs) loops, sleeps and publishes what these return.
+//! refresh token and the granted scope kept), what a change of the screen gives
+//! (`Session::change`, change.rs) and what each outcome leaves in the bundle's directory and
+//! publishes (`Link`). The bundle (../../src/lib.rs) loops, sleeps and publishes what these return.
 //!
 //! The outcomes and the screen:
 //!
@@ -27,12 +28,15 @@
 //! When the next read is (`Pace`): a minute after a read; after a failure 2 s, then twice as long
 //! each time up to 5 minutes, so an outage of Google or of the network is not asked every minute.
 
+use crate::change::{self, Change, Failure, Refusal};
 use crate::events::{ApiError, Read};
 use crate::google::Google;
-use crate::oauth::{AuthError, ClientConfig, Grant, Tokens};
+use crate::oauth::{Access, AuthError, ClientConfig, Grant, Tokens, READ_SCOPE};
 use everyware_bundle_store::Store;
 use everyware_catalog::calendar::{Agenda, CalendarLink};
+use everyware_catalog::calendar_service::CalendarFailure;
 use protobuf::Message;
+use serde_json::Value;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -124,6 +128,13 @@ pub fn agenda_of(link: CalendarLink) -> Agenda {
     agenda
 }
 
+/// Connected with `grant`, not read yet: `updated` 0, no events, the access granted.
+pub fn not_read(grant: &Grant) -> Agenda {
+    let mut agenda = agenda_of(CalendarLink::CALENDAR_CONNECTED);
+    agenda.can_change = grant.access() == Access::Change;
+    agenda
+}
+
 /// The link's state of an agenda.
 pub fn link_of(agenda: &Agenda) -> CalendarLink {
     agenda.link.enum_value_or_default()
@@ -153,9 +164,25 @@ impl Session {
         Session { client, grant, access }
     }
 
-    /// The grant as it is now (a refresh may have brought a new refresh token).
+    /// The grant as it is now (a refresh may have brought a new refresh token or scope).
     pub fn grant(&self) -> &Grant {
         &self.grant
+    }
+
+    /// Whether Google granted the change of the events (the grant's scope, as the last token
+    /// answer or change said).
+    pub fn can_change(&self) -> bool {
+        self.grant.access() == Access::Change
+    }
+
+    /// An access token with `REFRESH_MARGIN` left at `now`: the one there, or a new one (a new
+    /// refresh token and a new scope go into `store` at once).
+    async fn token<G: Google + ?Sized>(&mut self, google: &G, store: &Store, now: Instant) -> Result<String, AuthError> {
+        if self.access.as_ref().is_none_or(|(_, until)| now + REFRESH_MARGIN >= *until) {
+            let tokens = google.refresh(&self.client, &self.grant.refresh_token).await?;
+            self.renewed(tokens, store, now);
+        }
+        Ok(self.access.as_ref().map(|(token, _)| token.clone()).unwrap_or_default())
     }
 
     /// One read at `now` (`unix`: the same as unix time): the access token renewed when it has
@@ -163,15 +190,12 @@ impl Session {
     /// the API refused the one it had. A new refresh token goes into `store` at once.
     pub async fn read<G: Google + ?Sized>(&mut self, google: &G, store: &Store, now: Instant, unix: i64) -> Outcome {
         for _ in 0..2 {
-            if self.access.as_ref().is_none_or(|(_, until)| now + REFRESH_MARGIN >= *until) {
-                match google.refresh(&self.client, &self.grant.refresh_token).await {
-                    Ok(tokens) => self.renewed(tokens, store, now),
-                    Err(err @ (AuthError::Grant(_) | AuthError::Scope)) => return Outcome::Revoked(err.to_string()),
-                    Err(err @ AuthError::Client(_)) => return Outcome::Refused(err.to_string()),
-                    Err(err @ AuthError::Other(_)) => return Outcome::Again(err.to_string()),
-                }
-            }
-            let token = self.access.as_ref().map(|(token, _)| token.clone()).unwrap_or_default();
+            let token = match self.token(google, store, now).await {
+                Ok(token) => token,
+                Err(err @ (AuthError::Grant(_) | AuthError::Scope)) => return Outcome::Revoked(err.to_string()),
+                Err(err @ AuthError::Client(_)) => return Outcome::Refused(err.to_string()),
+                Err(err @ AuthError::Other(_)) => return Outcome::Again(err.to_string()),
+            };
             match google.events(&token, unix).await {
                 Ok(read) => return Outcome::Read(read),
                 // renewed and tried once more
@@ -184,16 +208,90 @@ impl Session {
         Outcome::Again("the access token was refused twice".into())
     }
 
-    /// The tokens of a refresh: a new refresh token kept in place of the old.
+    /// One change of the screen at `now` (change.rs): the event read as Google has it, the rule
+    /// checked on it, the change made on that version. Once more with a new access token when the
+    /// API refused the one it had, and once more from the read when the event changed in between
+    /// (412). Google saying that the grant lacks the scope makes the grant read only (kept in
+    /// `store`), so the next agenda offers no change.
+    pub async fn change<G: Google + ?Sized>(&mut self, google: &G, store: &Store, change: &Change, now: Instant) -> Result<(), Failure> {
+        let (mut renewed, mut read_again) = (false, false);
+        loop {
+            let token = self.token(google, store, now).await.map_err(|err| match err {
+                AuthError::Grant(_) | AuthError::Scope => Failure::new(CalendarFailure::CALENDAR_FAILURE_NOT_LINKED, err.to_string()),
+                AuthError::Client(_) => Failure::new(CalendarFailure::CALENDAR_FAILURE_REFUSED, err.to_string()),
+                AuthError::Other(_) => Failure::again(err.to_string()),
+            })?;
+            match apply(google, &token, change).await {
+                Ok(()) => return Ok(()),
+                Err(Refusal::Unauthorized) if !renewed => {
+                    renewed = true;
+                    self.access = None;
+                }
+                Err(Refusal::Changed) if !read_again => read_again = true,
+                Err(Refusal::Unauthorized) => return Err(Failure::again("the access token was refused twice")),
+                Err(Refusal::Changed) => return Err(Failure::again("the event changed twice while it was being changed")),
+                Err(Refusal::Failed(failure)) => {
+                    if failure.kind == CalendarFailure::CALENDAR_FAILURE_READ_ONLY {
+                        self.read_only(store);
+                    }
+                    return Err(failure);
+                }
+            }
+        }
+    }
+
+    /// The tokens of a refresh: a new refresh token and a new scope kept in place of the old.
     fn renewed(&mut self, tokens: Tokens, store: &Store, now: Instant) {
+        let mut changed = false;
         if let Some(refresh_token) = tokens.refresh_token.filter(|t| *t != self.grant.refresh_token) {
             self.grant.refresh_token = refresh_token;
-            if let Err(err) = store.save_private(GRANT_FILE, self.grant.to_json().as_bytes()) {
-                log::error!("the new refresh token not kept: {err}");
-            }
+            changed = true;
+        }
+        if let Some(scope) = tokens.scope.filter(|s| *s != self.grant.scope) {
+            log::info!("Google grants {:?} access", Access::granted(&scope).unwrap_or(Access::Read));
+            self.grant.scope = scope;
+            changed = true;
+        }
+        if changed {
+            self.keep(store);
         }
         log::debug!("a new access token for {} s", tokens.expires_in);
         self.access = Some((tokens.access_token, now + Duration::from_secs(tokens.expires_in)));
+    }
+
+    /// Google said the grant lacks the change of the events: read access from now on.
+    fn read_only(&mut self, store: &Store) {
+        if self.grant.access() != Access::Read {
+            log::warn!("Google says the grant may only read the calendar");
+            self.grant.scope = READ_SCOPE.to_string();
+            self.keep(store);
+        }
+    }
+
+    fn keep(&self, store: &Store) {
+        if let Err(err) = store.save_private(GRANT_FILE, self.grant.to_json().as_bytes()) {
+            log::error!("the grant not kept: {err}");
+        }
+    }
+}
+
+/// One try of `change` with the access token `token`: the event read, the rule checked on it, the
+/// change made with the event's ETag.
+async fn apply<G: Google + ?Sized>(google: &G, token: &str, change: &Change) -> Result<(), Refusal> {
+    let network = |why: String| Refusal::Failed(Failure::again(why));
+    let reply = google.call(token, &change.get()).await.map_err(network)?;
+    if reply.status != 200 {
+        return Err(change::refusal(reply.status, &reply.body));
+    }
+    let item: Value = serde_json::from_slice(&reply.body).map_err(|_| Refusal::Failed(Failure::again("events.get: not JSON")))?;
+    let Some(call) = change.call(&item).map_err(Refusal::Failed)? else {
+        return Ok(());
+    };
+    let reply = google.call(token, &call).await.map_err(network)?;
+    if (200..300).contains(&reply.status) {
+        Ok(())
+    } else {
+        Err(change::refusal(reply.status, &reply.body))
     }
 }
 
@@ -254,15 +352,22 @@ impl Link {
         if let Err(err) = self.store.save_private(GRANT_FILE, grant.to_json().as_bytes()) {
             log::error!("the grant not kept, the account has to be linked again after a restart: {err}");
         }
-        agenda_of(CalendarLink::CALENDAR_CONNECTED)
+        not_read(grant)
     }
 
-    /// A read at `unix` (`now` on the monotonic clock): the connected agenda, kept when it changed
-    /// or when the last one was kept `KEEP_EVERY` ago.
-    pub fn connected(&mut self, read: Read, unix: i64, now: Instant) -> Agenda {
+    /// A read at `unix` (`now` on the monotonic clock) with the change of the events granted or
+    /// not (`can_change`): the connected agenda, kept when it changed or when the last one was
+    /// kept `KEEP_EVERY` ago. Without the change no event offers one.
+    pub fn connected(&mut self, read: Read, can_change: bool, unix: i64, now: Instant) -> Agenda {
         let mut agenda = agenda_of(CalendarLink::CALENDAR_CONNECTED);
         agenda.calendar = read.calendar;
         agenda.events = read.events;
+        agenda.can_change = can_change;
+        if !can_change {
+            for event in &mut agenda.events {
+                (event.can_respond, event.can_delete) = (false, false);
+            }
+        }
         let content = agenda.clone();
         agenda.updated = unix;
         let same = self.kept.as_ref().is_some_and(|(kept, at)| *kept == content && now.saturating_duration_since(*at) < KEEP_EVERY);
@@ -316,7 +421,10 @@ impl Link {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use everyware_catalog::calendar::AgendaEvent;
+    use crate::change::ApiCall;
+    use crate::oauth::CHANGE_SCOPE;
+    use everyware_catalog::calendar::{AgendaEvent, Rsvp};
+    use everyware_https::Reply;
     use std::collections::VecDeque;
     use std::fs;
     use std::os::unix::fs::PermissionsExt;
@@ -331,12 +439,20 @@ mod tests {
     struct Script {
         refresh: Mutex<VecDeque<Result<Tokens, AuthError>>>,
         events: Mutex<VecDeque<Result<Read, ApiError>>>,
+        api: Mutex<VecDeque<Result<Reply, String>>>,
         calls: Mutex<Vec<String>>,
+        bodies: Mutex<Vec<String>>,
     }
 
     impl Script {
         fn new(refresh: Vec<Result<Tokens, AuthError>>, events: Vec<Result<Read, ApiError>>) -> Script {
-            Script { refresh: Mutex::new(refresh.into()), events: Mutex::new(events.into()), calls: Mutex::default() }
+            Script { refresh: Mutex::new(refresh.into()), events: Mutex::new(events.into()), ..Script::default() }
+        }
+
+        /// The answers of the changes' calls (status, body; an empty body for none), and the refreshes.
+        fn api(refresh: Vec<Result<Tokens, AuthError>>, api: Vec<Result<(u16, &str), &str>>) -> Script {
+            let api = api.into_iter().map(|a| a.map(|(status, body)| Reply { status, content_type: "application/json".into(), body: body.as_bytes().to_vec() }).map_err(str::to_string));
+            Script { refresh: Mutex::new(refresh.into()), api: Mutex::new(api.collect()), ..Script::default() }
         }
 
         fn calls(&self) -> Vec<String> {
@@ -359,6 +475,17 @@ mod tests {
             self.calls.lock().unwrap().push(format!("events {access_token}"));
             self.events.lock().unwrap().pop_front().expect("scripted events")
         }
+
+        // "PATCH abc a1 \"7\"": the method, the event, the token, the condition
+        async fn call(&self, access_token: &str, call: &ApiCall) -> Result<Reply, String> {
+            let event = call.url.split('?').next().unwrap().rsplit('/').next().unwrap();
+            let condition = call.if_match.as_deref().map(|e| format!(" {e}")).unwrap_or_default();
+            self.calls.lock().unwrap().push(format!("{} {event} {access_token}{condition}", call.method));
+            if let Some(body) = &call.body {
+                self.bodies.lock().unwrap().push(body.clone());
+            }
+            self.api.lock().unwrap().pop_front().expect("a scripted answer")
+        }
     }
 
     fn dir(test: &str) -> PathBuf {
@@ -374,11 +501,15 @@ mod tests {
     }
 
     fn grant() -> Grant {
-        Grant { client_id: "id-1".into(), refresh_token: "1//r".into() }
+        Grant { client_id: "id-1".into(), refresh_token: "1//r".into(), scope: READ_SCOPE.into() }
+    }
+
+    fn change_grant() -> Grant {
+        Grant { scope: format!("{READ_SCOPE} {CHANGE_SCOPE}"), ..grant() }
     }
 
     fn tokens(access: &str, refresh: Option<&str>) -> Tokens {
-        Tokens { access_token: access.into(), expires_in: 3600, refresh_token: refresh.map(str::to_string) }
+        Tokens { access_token: access.into(), expires_in: 3600, refresh_token: refresh.map(str::to_string), scope: None }
     }
 
     fn read(n: usize) -> Read {
@@ -444,7 +575,7 @@ mod tests {
         let store = Arc::new(Store::at(&d));
         let mut link = Link::new(store.clone());
         link.linked(&grant());
-        link.connected(read(3), 1_763_285_400, Instant::now());
+        link.connected(read(3), false, 1_763_285_400, Instant::now());
         let google = Script::new(vec![Err(AuthError::Grant("invalid_grant: Token has been expired or revoked.".into()))], vec![]);
         let mut session = Session::new(client(), grant(), None, Instant::now());
         assert!(matches!(session.read(&google, &store, Instant::now(), 0).await, Outcome::Revoked(why) if why.contains("invalid_grant")));
@@ -469,7 +600,7 @@ mod tests {
         let mut link = Link::new(store.clone());
         let client = link.client().unwrap();
         link.linked(&grant());
-        link.connected(read(3), 1_763_285_400, Instant::now());
+        link.connected(read(3), false, 1_763_285_400, Instant::now());
         // the secret reset in the Cloud console
         let google = Script::new(vec![Err(AuthError::Client("invalid_client: Unauthorized".into()))], vec![]);
         let outcome = Session::new(client.clone(), grant(), None, Instant::now()).read(&google, &store, Instant::now(), 0).await;
@@ -507,7 +638,7 @@ mod tests {
         let store = Arc::new(Store::at(&d));
         let mut link = Link::new(store.clone());
         assert_eq!(link.last(), (false, None));
-        let agenda = link.connected(read(2), 1_763_285_400, Instant::now());
+        let agenda = link.connected(read(2), false, 1_763_285_400, Instant::now());
         assert_eq!(mode(d.join(LAST_AGENDA)), 0o600);
         assert_eq!(link.last(), (false, Some(agenda)));
         // older than a day: not shown
@@ -567,12 +698,12 @@ mod tests {
         let not_read = failed(Some(&agenda_of(CalendarLink::CALENDAR_CONNECTED))).unwrap();
         assert_eq!((not_read.read_failed, not_read.updated, not_read.events.len()), (true, 0, 0));
         // read once: a failure keeps the events and the time of that read
-        let first = link.connected(read(2), 1000, Instant::now());
+        let first = link.connected(read(2), false, 1000, Instant::now());
         let after = failed(Some(&first)).unwrap();
         assert_eq!((after.read_failed, after.updated, after.events.len()), (true, 1000, 2));
         assert_eq!(after, Agenda { read_failed: true, ..first });
         // the next read clears it, and the kept agenda never has it
-        assert!(!link.connected(read(2), 1060, Instant::now()).read_failed);
+        assert!(!link.connected(read(2), false, 1060, Instant::now()).read_failed);
         assert!(!Agenda::parse_from_bytes(&fs::read(d.join(LAST_AGENDA)).unwrap()).unwrap().read_failed);
         // nothing to mark when the last agenda is not connected, or there is none
         assert_eq!(failed(Some(&agenda_of(CalendarLink::CALENDAR_EXPIRED))), None);
@@ -585,20 +716,20 @@ mod tests {
         let mut link = Link::new(Arc::new(Store::at(&d)));
         let kept = || Agenda::parse_from_bytes(&fs::read(d.join(LAST_AGENDA)).unwrap()).unwrap().updated;
         let t0 = Instant::now();
-        link.connected(read(2), 1000, t0);
+        link.connected(read(2), false, 1000, t0);
         assert_eq!(kept(), 1000);
         // a minute later, the same events: published with the new time, not written
-        assert_eq!(link.connected(read(2), 1060, t0 + Duration::from_secs(60)).updated, 1060);
+        assert_eq!(link.connected(read(2), false, 1060, t0 + Duration::from_secs(60)).updated, 1060);
         assert_eq!(kept(), 1000);
         // changed: written at once
-        link.connected(read(3), 1120, t0 + Duration::from_secs(120));
+        link.connected(read(3), false, 1120, t0 + Duration::from_secs(120));
         assert_eq!(kept(), 1120);
         // the same for an hour: written again
-        link.connected(read(3), 4720, t0 + Duration::from_secs(120) + KEEP_EVERY);
+        link.connected(read(3), false, 4720, t0 + Duration::from_secs(120) + KEEP_EVERY);
         assert_eq!(kept(), 4720);
         // after an expiry the next read is written whatever it is
         link.revoked();
-        link.connected(read(3), 4780, t0 + Duration::from_secs(180) + KEEP_EVERY);
+        link.connected(read(3), false, 4780, t0 + Duration::from_secs(180) + KEEP_EVERY);
         assert_eq!(kept(), 4780);
     }
 
@@ -614,13 +745,167 @@ mod tests {
         link.setup_url("");
     }
 
+    const INVITE: &str = r#"{"etag": "\"7\"", "organizer": {"email": "boss@example.org"},
+        "attendees": [{"email": "boss@example.org", "organizer": true, "responseStatus": "accepted"},
+                      {"email": "anna@example.org", "self": true, "responseStatus": "needsAction"}]}"#;
+    const MINE: &str = r#"{"etag": "\"8\"", "organizer": {"self": true}}"#;
+
+    fn answer(response: Rsvp) -> Change {
+        Change::Respond { event_id: "abc".into(), response }
+    }
+
+    fn remove() -> Change {
+        Change::Delete { event_id: "abc".into() }
+    }
+
+    fn fresh(grant: Grant) -> Session {
+        Session::new(client(), grant, Some(tokens("a1", None)), Instant::now())
+    }
+
+    fn failure(outcome: Result<(), Failure>) -> CalendarFailure {
+        outcome.expect_err("a failure").kind
+    }
+
+    #[tokio::test]
+    async fn an_answer_reads_the_event_then_patches_it() {
+        let d = dir("answer");
+        let store = Store::at(&d);
+        let google = Script::api(vec![], vec![Ok((200, INVITE)), Ok((200, r#"{"id":"abc"}"#))]);
+        assert_eq!(fresh(change_grant()).change(&google, &store, &answer(Rsvp::RSVP_TENTATIVE), Instant::now()).await, Ok(()));
+        assert_eq!(google.calls(), ["GET abc a1", "PATCH abc a1 \"7\""]);
+        let body: Value = serde_json::from_str(&google.bodies.lock().unwrap()[0]).unwrap();
+        assert_eq!(body["attendees"][1]["responseStatus"], "tentative");
+        assert_eq!(body["attendees"][0]["responseStatus"], "accepted");
+        // the answer it has already: read, nothing patched
+        let accepted = INVITE.replace("needsAction", "accepted");
+        let google = Script::api(vec![], vec![Ok((200, accepted.as_str()))]);
+        assert_eq!(fresh(change_grant()).change(&google, &store, &answer(Rsvp::RSVP_ACCEPTED), Instant::now()).await, Ok(()));
+        assert_eq!(google.calls(), ["GET abc a1"]);
+    }
+
+    #[tokio::test]
+    async fn a_deletion_reads_the_event_then_deletes_it() {
+        let d = dir("delete");
+        let store = Store::at(&d);
+        let google = Script::api(vec![], vec![Ok((200, MINE)), Ok((204, ""))]);
+        assert_eq!(fresh(change_grant()).change(&google, &store, &remove(), Instant::now()).await, Ok(()));
+        assert_eq!(google.calls(), ["GET abc a1", "DELETE abc a1 \"8\""]);
+        // gone before or in between
+        let google = Script::api(vec![], vec![Ok((404, r#"{"error":{"errors":[{"reason":"notFound"}]}}"#))]);
+        assert_eq!(failure(fresh(change_grant()).change(&google, &store, &remove(), Instant::now()).await), CalendarFailure::CALENDAR_FAILURE_GONE);
+        let google = Script::api(vec![], vec![Ok((200, MINE)), Ok((410, r#"{"error":{"errors":[{"reason":"deleted"}]}}"#))]);
+        assert_eq!(failure(fresh(change_grant()).change(&google, &store, &remove(), Instant::now()).await), CalendarFailure::CALENDAR_FAILURE_GONE);
+        // an invitation is not the account's to delete: read, refused, nothing deleted
+        let google = Script::api(vec![], vec![Ok((200, INVITE))]);
+        assert_eq!(failure(fresh(change_grant()).change(&google, &store, &remove(), Instant::now()).await), CalendarFailure::CALENDAR_FAILURE_NOT_ALLOWED);
+        assert_eq!(google.calls(), ["GET abc a1"]);
+    }
+
+    #[tokio::test]
+    async fn a_401_renews_the_token_once_and_a_412_reads_again_once() {
+        let d = dir("again401");
+        let store = Store::at(&d);
+        let unauthorized = r#"{"error":{"code":401}}"#;
+        let google = Script::api(vec![Ok(tokens("a2", None))], vec![Ok((401, unauthorized)), Ok((200, MINE)), Ok((204, ""))]);
+        assert_eq!(fresh(change_grant()).change(&google, &store, &remove(), Instant::now()).await, Ok(()));
+        assert_eq!(google.calls(), ["GET abc a1", "refresh 1//r", "GET abc a2", "DELETE abc a2 \"8\""]);
+        // refused again after the renewal: not a third time
+        let google = Script::api(vec![Ok(tokens("a2", None))], vec![Ok((401, unauthorized)), Ok((401, unauthorized))]);
+        assert_eq!(failure(fresh(change_grant()).change(&google, &store, &remove(), Instant::now()).await), CalendarFailure::CALENDAR_FAILURE_AGAIN);
+        // the event changed between the read and the patch: read again, patched on the new version
+        let changed = r#"{"error":{"code":412,"errors":[{"reason":"conditionNotMet"}]}}"#;
+        let newer = INVITE.replace(r#"\"7\""#, r#"\"9\""#);
+        let google = Script::api(vec![], vec![Ok((200, INVITE)), Ok((412, changed)), Ok((200, newer.as_str())), Ok((200, "{}"))]);
+        assert_eq!(fresh(change_grant()).change(&google, &store, &answer(Rsvp::RSVP_DECLINED), Instant::now()).await, Ok(()));
+        assert_eq!(google.calls(), ["GET abc a1", "PATCH abc a1 \"7\"", "GET abc a1", "PATCH abc a1 \"9\""]);
+        // changing under the panel twice: later
+        let google = Script::api(vec![], vec![Ok((200, INVITE)), Ok((412, changed)), Ok((200, INVITE)), Ok((412, changed))]);
+        assert_eq!(failure(fresh(change_grant()).change(&google, &store, &answer(Rsvp::RSVP_DECLINED), Instant::now()).await), CalendarFailure::CALENDAR_FAILURE_AGAIN);
+    }
+
+    #[tokio::test]
+    async fn a_change_that_fails_ends_in_a_clear_state() {
+        let d = dir("fails");
+        let store = Store::at(&d);
+        // no network: later
+        let google = Script::api(vec![], vec![Err("dns error")]);
+        assert_eq!(failure(fresh(change_grant()).change(&google, &store, &remove(), Instant::now()).await), CalendarFailure::CALENDAR_FAILURE_AGAIN);
+        let google = Script::api(vec![], vec![Ok((200, MINE)), Err("timeout")]);
+        assert_eq!(failure(fresh(change_grant()).change(&google, &store, &remove(), Instant::now()).await), CalendarFailure::CALENDAR_FAILURE_AGAIN);
+        let google = Script::api(vec![], vec![Ok((200, "<html>"))]);
+        assert_eq!(failure(fresh(change_grant()).change(&google, &store, &remove(), Instant::now()).await), CalendarFailure::CALENDAR_FAILURE_AGAIN);
+        // the grant revoked, the client refused: no change, the reads take it from there
+        let google = Script::api(vec![Err(AuthError::Grant("invalid_grant".into()))], vec![]);
+        let mut session = Session::new(client(), change_grant(), None, Instant::now());
+        assert_eq!(failure(session.change(&google, &store, &remove(), Instant::now()).await), CalendarFailure::CALENDAR_FAILURE_NOT_LINKED);
+        let google = Script::api(vec![Err(AuthError::Client("invalid_client".into()))], vec![]);
+        assert_eq!(failure(session.change(&google, &store, &remove(), Instant::now()).await), CalendarFailure::CALENDAR_FAILURE_REFUSED);
+        let google = Script::api(vec![Err(AuthError::Other("dns error".into()))], vec![]);
+        assert_eq!(failure(session.change(&google, &store, &remove(), Instant::now()).await), CalendarFailure::CALENDAR_FAILURE_AGAIN);
+        // Google refuses the change itself
+        let google = Script::api(vec![], vec![Ok((200, INVITE)), Ok((403, r#"{"error":{"errors":[{"reason":"forbidden"}]}}"#))]);
+        assert_eq!(failure(fresh(change_grant()).change(&google, &store, &answer(Rsvp::RSVP_ACCEPTED), Instant::now()).await), CalendarFailure::CALENDAR_FAILURE_REFUSED);
+    }
+
+    #[tokio::test]
+    async fn google_saying_read_only_makes_the_grant_read_only() {
+        let d = dir("readonly");
+        let store = Store::at(&d);
+        let mut session = fresh(change_grant());
+        assert!(session.can_change());
+        let scope = r#"{"error":{"code":403,"errors":[{"reason":"insufficientPermissions"}],"details":[{"reason":"ACCESS_TOKEN_SCOPE_INSUFFICIENT"}]}}"#;
+        let google = Script::api(vec![], vec![Ok((200, MINE)), Ok((403, scope))]);
+        assert_eq!(failure(session.change(&google, &store, &remove(), Instant::now()).await), CalendarFailure::CALENDAR_FAILURE_READ_ONLY);
+        assert!(!session.can_change());
+        // kept: the next start offers no change either
+        let kept = Grant::parse(&fs::read(d.join(GRANT_FILE)).unwrap()).unwrap();
+        assert_eq!((kept.access(), kept.refresh_token.as_str()), (Access::Read, "1//r"));
+        assert_eq!(mode(d.join(GRANT_FILE)), 0o600);
+    }
+
+    #[tokio::test]
+    async fn the_granted_scope_of_a_refresh_is_kept() {
+        let d = dir("scope");
+        let store = Store::at(&d);
+        // a grant kept before the choice (no scope): read access until Google says more
+        let mut session = Session::new(client(), Grant { scope: String::new(), ..grant() }, None, Instant::now());
+        assert!(!session.can_change());
+        let granted = Tokens { scope: Some(format!("{CHANGE_SCOPE} {READ_SCOPE}")), ..tokens("a1", None) };
+        let google = Script::new(vec![Ok(granted)], vec![Ok(read(1))]);
+        assert!(matches!(session.read(&google, &store, Instant::now(), 0).await, Outcome::Read(_)));
+        assert!(session.can_change());
+        assert_eq!(Grant::parse(&fs::read(d.join(GRANT_FILE)).unwrap()).unwrap().access(), Access::Change);
+        // a refresh without a scope changes nothing
+        let mut session = Session::new(client(), change_grant(), None, Instant::now());
+        let google = Script::new(vec![Ok(tokens("a2", None))], vec![Ok(read(1))]);
+        session.read(&google, &store, Instant::now(), 0).await;
+        assert!(session.can_change());
+    }
+
+    #[test]
+    fn without_the_change_no_event_offers_one() {
+        let d = dir("canchange");
+        let mut link = Link::new(Arc::new(Store::at(&d)));
+        let mut events = read(2);
+        for e in &mut events.events {
+            (e.can_respond, e.can_delete) = (true, true);
+        }
+        let agenda = link.connected(events.clone(), true, 1000, Instant::now());
+        assert!(agenda.can_change && agenda.events.iter().all(|e| e.can_respond && e.can_delete));
+        let agenda = link.connected(events, false, 1060, Instant::now());
+        assert!(!agenda.can_change && agenda.events.iter().all(|e| !e.can_respond && !e.can_delete));
+        // linked just now: the access granted, not read yet
+        assert!(link.linked(&change_grant()).can_change);
+        assert!(!link.linked(&grant()).can_change);
+    }
+
     #[test]
     fn a_grant_of_another_client_is_not_taken() {
         let d = dir("other");
         let mut link = Link::new(Arc::new(Store::at(&d)));
         let client = link.client().unwrap();
         assert!(link.grant(&client).is_none());
-        link.linked(&Grant { client_id: "id-0".into(), refresh_token: "1//old".into() });
+        link.linked(&Grant { client_id: "id-0".into(), refresh_token: "1//old".into(), scope: String::new() });
         assert!(link.grant(&client).is_none());
         link.linked(&grant());
         assert_eq!(link.grant(&client), Some(grant()));
