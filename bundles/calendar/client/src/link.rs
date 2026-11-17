@@ -22,7 +22,7 @@
 //! | a read | `agenda.pb` | `CALENDAR_CONNECTED` with the events |
 //! | `invalid_grant`, the scope gone | `grant.json` removed | `CALENDAR_EXPIRED`, no events, the setup page again |
 //! | the client refused, the Calendar API off | `grant.json` kept (a reset secret keeps the client's id) | `CALENDAR_NO_CLIENT`, no events, until `oauth-client.json` changes |
-//! | anything else | | the last agenda stays, with `read_failed` (`failed`); its `updated` tells its age |
+//! | anything else | | the last agenda stays, with `read_failed` (`failed`) once the reads have failed for `FAILED_AFTER`; its `updated` tells its age |
 //!
 //! When the next read is (`Pace`): a minute after a read; after a failure 2 s, then twice as long
 //! each time up to 5 minutes, so an outage of Google or of the network is not asked every minute.
@@ -58,6 +58,10 @@ pub const POLL_INTERVAL: Duration = Duration::from_secs(60);
 pub const RETRY_FIRST: Duration = Duration::from_secs(2);
 /// The longest wait after failures (an outage of Google: 429, 5xx, or of the network).
 pub const RETRY_MAX: Duration = Duration::from_secs(300);
+/// The screen hears of failed reads (`read_failed`) once they have failed for this long, the
+/// waits between them counted (the fifth failure in a row): at a start the bundle runs before
+/// the network is up, and its first reads fail for a few seconds.
+pub const FAILED_AFTER: Duration = Duration::from_secs(30);
 /// An agenda that did not change (a read every minute changes only `updated`) is written again
 /// at most this often, to spare the flash; a changed one at once.
 pub const KEEP_EVERY: Duration = Duration::from_secs(3600);
@@ -66,25 +70,35 @@ pub const KEEP_EVERY: Duration = Duration::from_secs(3600);
 pub const SETUP_URL_FILE: &str = "setup-url";
 
 /// When the next read is: `POLL_INTERVAL` after a read; after failures `RETRY_FIRST`, then twice
-/// as long each time up to `RETRY_MAX`.
+/// as long each time up to `RETRY_MAX`. And whether the reads fail for long enough to say so
+/// (`failing`).
 #[derive(Debug, Default)]
 pub struct Pace {
     /// The last wait after a failure, while the reads fail.
     retry: Option<Duration>,
+    /// The waits between the failures in a row so far.
+    waited: Duration,
 }
 
 impl Pace {
     /// The wait after a read that succeeded; the failures start again from `RETRY_FIRST`.
     pub fn after_read(&mut self) -> Duration {
-        self.retry = None;
+        (self.retry, self.waited) = (None, Duration::ZERO);
         POLL_INTERVAL
     }
 
     /// The wait after a read that failed.
     pub fn after_failure(&mut self) -> Duration {
+        self.waited += self.retry.unwrap_or_default();
         let wait = self.retry.map_or(RETRY_FIRST, |last| (last * 2).min(RETRY_MAX));
         self.retry = Some(wait);
         wait
+    }
+
+    /// Whether the reads have failed for `FAILED_AFTER` (since the last read that worked, or the
+    /// start): the screen is told then, not at the first failure of a start.
+    pub fn failing(&self) -> bool {
+        self.waited >= FAILED_AFTER
     }
 }
 
@@ -526,6 +540,23 @@ mod tests {
         // a read that works again: the minute again, and the next failure from 2 s
         assert_eq!(pace.after_read(), POLL_INTERVAL);
         assert_eq!(pace.after_failure(), RETRY_FIRST);
+    }
+
+    #[test]
+    fn failed_reads_are_said_after_half_a_minute() {
+        // a start before the network: the first four failures (0, 2, 6 and 14 s in) are not
+        // said, the fifth (30 s in) is
+        let mut pace = Pace::default();
+        let failing: Vec<bool> = (0..6).map(|_| {
+            pace.after_failure();
+            pace.failing()
+        }).collect();
+        assert_eq!(failing, [false, false, false, false, true, true]);
+        // a read that works: from the start again
+        pace.after_read();
+        pace.after_failure();
+        assert!(!pace.failing());
+        assert_eq!(FAILED_AFTER, Duration::from_secs(30));
     }
 
     #[test]

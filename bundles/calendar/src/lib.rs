@@ -275,8 +275,9 @@ enum Ended {
 }
 
 /// The agenda of the linked account: read at once, then every `POLL_INTERVAL`; after a failed
-/// read the waits grow (`Pace`) and the last agenda goes out again with `read_failed`. Returns
-/// when the grant is not good any more or Google refuses the client.
+/// read the waits grow (`Pace`), and once the reads have failed for `FAILED_AFTER` the last
+/// agenda goes out again with `read_failed`. Returns when the grant is not good any more or
+/// Google refuses the client.
 async fn read_agenda(mut session: Session, link: &mut Link, out: &mut Output) -> Ended {
     let mut pace = Pace::default();
     let mut count = None;
@@ -297,7 +298,7 @@ async fn read_agenda(mut session: Session, link: &mut Link, out: &mut Output) ->
             Outcome::Again(why) => {
                 let wait = pace.after_failure();
                 warn!("reading the calendar failed: {why}; again in {} s", wait.as_secs());
-                if let Some(agenda) = failed(out.last.as_ref()) {
+                if let Some(agenda) = failed(out.last.as_ref()).filter(|_| pace.failing()) {
                     out.publish(agenda);
                 }
                 wait
