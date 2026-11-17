@@ -78,7 +78,8 @@ service_bundle {
 
 # Reads the next seven days of the primary Google Calendar of the account linked on the panel
 # and publishes them as the agenda of the house, with the state of the link (the setup page's
-# URL while no account is linked).
+# URL while no account is linked), and offers the CalendarService (calendar_service.proto): an
+# answer to an invitation, the deletion of the account's own event, each answered.
 service_bundle {
     name: "CalendarServiceBundle"
 
@@ -87,12 +88,17 @@ service_bundle {
         topic: "agenda"
         capacity: 2
     }
+
+    server {
+        service: "CalendarService"
+        channel: "calendar"
+    }
 }
 
 # The bridge to the screen: subscribes to what the dashboard shows and hands it to the harry
-# process over a local gRPC connection (the harry process is no SDV participant); what the
-# screen asks for (a Wi-Fi command) it calls on the bundle that owns the device and hands
-# the answer back.
+# process over binder (the harry process is no SDV participant); what the screen asks for (a
+# Wi-Fi, Matter or calendar command) it calls on the bundle that owns it and hands the answer
+# back.
 service_bundle {
     name: "DashboardServiceBundle"
 
@@ -139,6 +145,11 @@ service_bundle {
     client {
         service: "MatterService"
         channel: "matter"
+    }
+
+    client {
+        service: "CalendarService"
+        channel: "calendar"
     }
 
     # The device's settings for the screen, as Google's HMI sample takes them: it subscribes to a

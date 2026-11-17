@@ -1,0 +1,95 @@
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//      http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+// The calendar bundle's service: what the screen (through the dashboard bundle) asks it to change
+// in the linked account's calendar, and the unlink of the account, each call answered
+// (bundles/calendar). The agenda is a topic (calendar.proto); a change with an outcome is an RPC.
+// The bundle takes a change only for an event of the agenda it published last that allows it
+// (AgendaEvent.can_respond, can_delete), checks the rule again on the event as Google has it,
+// makes the change, reads the calendar at once and publishes the new agenda before it answers.
+syntax = "proto3";
+
+package com.everyware;
+
+import "sdv/vsidl/v1/annotations.proto";
+import "calendar.proto";
+
+// Why a change was not made.
+enum CalendarFailure {
+    // The change was made (CalendarResult.ok).
+    CALENDAR_FAILURE_NONE = 0;
+    // The panel may only read the account's calendar: the owner chose read access when linking,
+    // unticked the change on Google's consent screen, or Google says the grant lacks the scope.
+    // Linking again with "read and change" gives it.
+    CALENDAR_FAILURE_READ_ONLY = 1;
+    // The event is not in the agenda any more, or Google says it is gone (deleted, cancelled).
+    CALENDAR_FAILURE_GONE = 2;
+    // Not a change this event allows (not invited, not the organizer, private, not an ordinary
+    // event), or not a request of the screen (an id that is not Google's, no answer given).
+    CALENDAR_FAILURE_NOT_ALLOWED = 3;
+    // Google refused the change for another reason (the API turned off, a forbidden change).
+    CALENDAR_FAILURE_REFUSED = 4;
+    // No network, Google busy or a quota, no answer in time: the same press may work later.
+    CALENDAR_FAILURE_AGAIN = 5;
+    // No account is linked, or its grant ran out.
+    CALENDAR_FAILURE_NOT_LINKED = 6;
+}
+
+// The outcome of a change.
+message CalendarResult {
+    bool ok = 1;
+    // Why not; CALENDAR_FAILURE_NONE when ok.
+    CalendarFailure failure = 2;
+    // Why not in words, for the log ("Google: HTTP 403 forbiddenForNonOrganizer").
+    string error = 3 [(.sdv.vsidl.v1.variable_type_max_size) = 96];
+}
+
+// Answer an invitation: the account's own answer to one event of the agenda (one occurrence of a
+// recurring event). Google tells the organizer (sendUpdates=all).
+message CalendarRespond {
+    // AgendaEvent.id.
+    string event_id = 1 [(.sdv.vsidl.v1.variable_type_max_size) = 128];
+    // RSVP_ACCEPTED, RSVP_TENTATIVE or RSVP_DECLINED.
+    Rsvp response = 2;
+}
+
+// Delete one of the account's own events (one occurrence of a recurring event). Google tells the
+// guests (sendUpdates=all).
+message CalendarDelete {
+    // AgendaEvent.id.
+    string event_id = 1 [(.sdv.vsidl.v1.variable_type_max_size) = 128];
+}
+
+// Unlink the account: the panel's grant revoked at Google and forgotten on the panel, the agenda
+// CALENDAR_NOT_CONNECTED with a new setup URL. Linking again offers the choice of access, so this
+// is also how the access changes.
+message CalendarDisconnect {}
+
+// One change, as the screen sends it through the dashboard bundle (which calls the matching rpc).
+message CalendarCommand {
+    oneof command {
+        CalendarRespond respond = 1;
+        CalendarDelete delete = 2;
+        CalendarDisconnect disconnect = 3;
+    }
+}
+
+service CalendarService {
+    // Answers an invitation: events.patch of the account's own attendee.
+    rpc Respond(CalendarRespond) returns (CalendarResult);
+    // Deletes an event of the account: events.delete.
+    rpc Delete(CalendarDelete) returns (CalendarResult);
+    // Unlinks the account, with read or write access alike. When Google cannot be told (no
+    // network, Google busy: CALENDAR_FAILURE_AGAIN) the account stays linked; without an account
+    // CALENDAR_FAILURE_NOT_LINKED.
+    rpc Disconnect(CalendarDisconnect) returns (CalendarResult);
+}

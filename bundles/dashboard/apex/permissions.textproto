@@ -1,8 +1,9 @@
 # proto-file: //system/software_defined_vehicle/middleware/service_authz/proto/sdv/authz/policy/authz_policy.proto
 # proto-message: AuthzPolicy
 #
-# What DashboardServiceBundle may do on the SDV middleware: read what the dashboard shows.
-# The same topics as in catalog/everyware.vsidl.
+# What DashboardServiceBundle may do on the SDV middleware: read what the dashboard shows and
+# call the services the screen's commands go to. The same topics and services as in
+# catalog/everyware.vsidl.
 
 subscriber {
   message: "com.everyware.Weather"
@@ -39,6 +40,10 @@ client {
 client {
   service: "com.everyware.MatterService"
   channel: "matter"
+}
+client {
+  service: "com.everyware.CalendarService"
+  channel: "calendar"
 }
 client {
   service: "com.android.sdv.user_preferences.UserPreferencesManagementService"

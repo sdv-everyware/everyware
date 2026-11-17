@@ -6,7 +6,9 @@
 //! screen serves, the bundle calls it. The other way, the screen's commands come into this
 //! bundle's sink: a Wi-Fi command (it may carry the password typed on the screen) becomes a call
 //! of the Wi-Fi bundle's `WifiService`, a Matter command one of the Matter bundle's
-//! `MatterService` (SDV RPC, catalog/*_service.proto), and the answer goes back to the screen.
+//! `MatterService`, a calendar change one of the calendar bundle's `CalendarService` (SDV RPC,
+//! catalog/*_service.proto), and the answer goes back to the screen (the calendar's after the
+//! agenda the calendar bundle publishes after the change).
 //!
 //! The bundle keeps the last value of every topic and sends it again when the panel comes back
 //! (it restarted and starts from nothing). Whether the link is up, the panel learns from binder:
@@ -21,8 +23,10 @@ use log::{debug, error, info, warn};
 use protobuf::Message;
 use sdv::mw::{clientlib, Availability, Communicate, SdvComms, SubscribeOptions};
 use sdv::status::SdvResult;
+use com_everyware_calendar_service_rpc::Client as CalendarClient;
 use com_everyware_matter_service_rpc::Client as MatterClient;
 use com_everyware_wifi_service_rpc::Client as WifiClient;
+use everyware_catalog::calendar_service::calendar_command::Command as CalendarCmd;
 use everyware_catalog::matter_service::matter_command::Command as MatterCmd;
 use everyware_catalog::wifi::wifi_command::Command;
 use sdv_mw_rs_com_everyware_dashboard_service_bundle::{ClientDescriptors, DashboardServiceBundle as Bundle, SubscriberDescriptors};
@@ -46,6 +50,9 @@ const WIFI_CALL_TIMEOUT: Duration = Duration::from_secs(40);
 /// The deadline of a MatterService call: a pairing is answered within the Matter bundle's
 /// 150 s, a device command within its 20 s.
 const MATTER_CALL_TIMEOUT: Duration = Duration::from_secs(160);
+/// The deadline of a CalendarService call: the calendar bundle takes a change within 70 s and
+/// answers within 65 s from then on (Google's answers, then the read of the agenda).
+const CALENDAR_CALL_TIMEOUT: Duration = Duration::from_secs(150);
 
 type Agenda = everyware_catalog::calendar::Agenda;
 type News = everyware_catalog::news::NewsFeed;
@@ -59,6 +66,8 @@ type WifiResult = everyware_catalog::wifi_service::WifiResult;
 type MatterDevices = everyware_catalog::matter::MatterDevices;
 type MatterCommand = everyware_catalog::matter_service::MatterCommand;
 type MatterResult = everyware_catalog::matter_service::MatterResult;
+type CalendarCommand = everyware_catalog::calendar_service::CalendarCommand;
+type CalendarResult = everyware_catalog::calendar_service::CalendarResult;
 
 /// The last value of every topic, sent again when the panel comes back.
 #[derive(Default)]
@@ -81,6 +90,7 @@ struct Last {
 struct Services {
     wifi: OnceLock<Arc<WifiClient>>,
     matter: OnceLock<Arc<MatterClient>>,
+    calendar: OnceLock<Arc<CalendarClient>>,
 }
 
 sdv::lifecycle::register_service_bundle!(DashboardServiceBundle);
@@ -184,6 +194,7 @@ async fn sdv_main(context: ContextRef, comms: Arc<dyn Communicate>) -> SdvResult
     // The agenda on its own as well: the subscriptions below wait for their publishers one after
     // the other, and a product may carry the calendar without the news or the other way round.
     tokio::spawn(agenda_link(comms.clone(), screen.clone(), last.clone()));
+    tokio::spawn(find_calendar(comms.clone(), services.clone()));
     // The publishers may start later than this bundle: every subscription waits on its own.
     // Every topic is state (the weather now, the feed now, the networks now): a subscription
     // gets the publication's last message at once (read_on_subscribe), so what a bundle
@@ -428,6 +439,29 @@ async fn create_matter_client(comms: &dyn Communicate) -> Option<MatterClient> {
     }
 }
 
+/// The calendar bundle's CalendarService for the screen's changes, once it is there.
+async fn find_calendar(comms: Arc<dyn Communicate>, services: Arc<Services>) {
+    let descriptor = ClientDescriptors::<CalendarClient>::CALENDAR;
+    let Ok(mut events) = clientlib::create_server_registration_event_stream(comms.as_ref(), descriptor).await else {
+        error!("Failed to create the registration event stream of CalendarService#calendar");
+        return;
+    };
+    while let Some(event) = events.next().await {
+        if event == Availability::Available {
+            break;
+        }
+        debug!("waiting for CalendarService#calendar");
+    }
+    let Ok(options) = sdv::mw::ClientOptions::builder().timeout_in_sec(CALENDAR_CALL_TIMEOUT.as_secs() as u32).build() else { return };
+    match clientlib::create_rpc_client(comms.as_ref(), descriptor, options).await {
+        Ok(client) => {
+            info!("calling CalendarService#calendar");
+            let _ = services.calendar.set(Arc::new(client));
+        }
+        Err(e) => error!("Failed to create the client of CalendarService#calendar: {e:?}"),
+    }
+}
+
 /// The Wi-Fi bundle's WifiService for the screen's commands, once it is there.
 async fn find_wifi(comms: Arc<dyn Communicate>, services: Arc<Services>) {
     if let Some(wifi) = create_wifi_client(comms.as_ref()).await {
@@ -547,6 +581,13 @@ async fn handle_commands(
             ScreenCommand::Settings(bytes) => {
                 let _ = settings.send(bytes);
             }
+            ScreenCommand::Calendar(bytes) => {
+                let Ok(command) = CalendarCommand::parse_from_bytes(&bytes) else {
+                    warn!("a calendar command that does not parse");
+                    continue;
+                };
+                tokio::spawn(call_calendar(screen.clone(), services.calendar.get().cloned(), command));
+            }
         }
     }
 }
@@ -597,6 +638,46 @@ fn failed(error: &str) -> WifiResult {
     let mut result = WifiResult::new();
     result.error = error.to_string();
     result
+}
+
+/// One calendar change or the unlink of the account: the call, then its answer to the screen (a
+/// call that did not get through too: the screen must not wait for it). The calendar bundle
+/// publishes the agenda after the change before it answers.
+async fn call_calendar(screen: Arc<Screen>, calendar: Option<Arc<CalendarClient>>, command: CalendarCommand) {
+    let (name, event_id) = match &command.command {
+        Some(CalendarCmd::Respond(r)) => ("respond", r.event_id.clone()),
+        Some(CalendarCmd::Delete(r)) => ("delete", r.event_id.clone()),
+        Some(CalendarCmd::Disconnect(_)) => ("disconnect", String::new()),
+        Some(_) | None => return,
+    };
+    let again = |error: &str| {
+        let mut result = CalendarResult::new();
+        result.failure = everyware_catalog::calendar_service::CalendarFailure::CALENDAR_FAILURE_AGAIN.into();
+        result.error = error.to_string();
+        result
+    };
+    let Some(calendar) = calendar else {
+        warn!("calendar {name} {event_id:?}: the calendar service is not there yet");
+        screen.publish_calendar_result(name, &event_id, &again("the calendar service is not there yet"));
+        return;
+    };
+    let answer: SdvResult<CalendarResult> = match command.command {
+        Some(CalendarCmd::Respond(r)) => calendar.Respond(&r).await,
+        Some(CalendarCmd::Delete(r)) => calendar.Delete(&r).await,
+        Some(CalendarCmd::Disconnect(r)) => calendar.Disconnect(&r).await,
+        Some(_) | None => return,
+    };
+    let result = match answer {
+        Ok(result) => {
+            info!("calendar {name} {event_id:?}: ok {} {:?} {:?}", result.ok, result.failure, result.error);
+            result
+        }
+        Err(e) => {
+            warn!("calendar {name} {event_id:?}: the call failed: {e:?}");
+            again("the calendar service did not answer")
+        }
+    };
+    screen.publish_calendar_result(name, &event_id, &result);
 }
 
 /// One Matter command, then its answer to the screen (a call that did not get through too).

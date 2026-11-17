@@ -11,7 +11,8 @@
 // limitations under the License.
 
 // CalendarServiceBundle: the next seven days of the linked Google account's primary calendar,
-// published on the topic "agenda", and the setup page that links the account.
+// published on the topic "agenda", the setup page that links the account, and the
+// CalendarService through which the screen answers invitations and deletes the account's events.
 // The module is shaped as vsidlc generates a service bundle (vsidlc --services).
 
 package {
@@ -39,6 +40,8 @@ rust_ffi_shared {
         "libeveryware_calendar_client",
         // the grant and the last agenda in the bundle's directory (libs/bundle-store)
         "libeveryware_bundle_store",
+        // the CalendarService the screen's changes come through (catalog/calendar_service.proto)
+        "libcom_everyware_calendar_service_rpc_rs",
     ],
     proc_macros: ["libasync_trait"],
     apex_available: [

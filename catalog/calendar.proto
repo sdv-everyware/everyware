@@ -34,6 +34,20 @@ enum CalendarLink {
     CALENDAR_EXPIRED = 3;
 }
 
+// The linked account's answer to an invitation (Google's responseStatus of its own attendee).
+enum Rsvp {
+    // Not an invitation to the account: its own event, or one it is not a guest of.
+    RSVP_NONE = 0;
+    // Invited, not answered yet.
+    RSVP_NEEDS_ACTION = 1;
+    RSVP_ACCEPTED = 2;
+    // "Maybe".
+    RSVP_TENTATIVE = 3;
+    // Not in the agenda (Agenda.events leaves the declined invitations out); an answer the screen
+    // can give (CalendarService.Respond).
+    RSVP_DECLINED = 4;
+}
+
 message Agenda {
     option (.sdv.vsidl.v1.publication) = {
         // a new agenda every minute; the subscribers want the latest one
@@ -64,6 +78,12 @@ message Agenda {
     // With updated 0 the calendar could not be read since the link or the start: the events are
     // unknown. False again after the next successful read.
     bool read_failed = 6;
+    // With CALENDAR_CONNECTED: Google granted the panel the change of the account's events (the
+    // scope calendar.events), so the screen may answer invitations and delete the account's own
+    // events (CalendarService, calendar_service.proto; an event says which with can_respond and
+    // can_delete). The owner chooses the access on the setup page and may untick it on Google's
+    // consent screen: this is what Google granted. False with read access only.
+    bool can_change = 7;
 }
 
 // One event, or one occurrence of a recurring event.
@@ -92,4 +112,18 @@ message AgendaEvent {
     // entry point of its conference data. https only; empty for none and for a private or
     // confidential event.
     string meeting_url = 9 [(.sdv.vsidl.v1.variable_type_max_size) = 256];
+    // The account's own answer when it is a guest of the event and not its organizer; RSVP_NONE
+    // otherwise. Google's, also with read access only.
+    Rsvp response = 10;
+    // One occurrence of a recurring event: a change is a change of this occurrence only.
+    bool recurring = 11;
+    // The screen may answer the invitation (CalendarService.Respond): Agenda.can_change, the
+    // account is a guest and not the organizer, and it is an ordinary event (not a birthday, not
+    // from Gmail, not out of office, focus time or a working location) that is not private or
+    // confidential.
+    bool can_respond = 12;
+    // The screen may delete the event (CalendarService.Delete): Agenda.can_change, the account
+    // organizes it (Google's organizer.self), and it is an ordinary event that is not private or
+    // confidential.
+    bool can_delete = 13;
 }

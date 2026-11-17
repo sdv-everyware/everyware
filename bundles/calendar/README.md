@@ -19,18 +19,25 @@ panel to a Google account the way Home Assistant does, reads the next seven days
 account's primary calendar every minute and publishes them on the topic `agenda`
 (`catalog/calendar.proto`, `catalog/everyware.vsidl`), together with the state of the link. The
 screen gets it through the dashboard bundle (`IScreenLink.publishAgenda`) and shows the agenda,
-or the QR code of the setup page while no account is linked.
+or the QR code of the setup page while no account is linked. The bundle also serves
+`CalendarService` (`catalog/calendar_service.proto`): through it the screen unlinks the account,
+and, when the owner gave the panel write access, answers invitations and deletes the account's
+own events (without it those are answered `READ_ONLY`).
 
 ```mermaid
 flowchart LR
     PH["phone"] -- "1 scans the QR code:<br/>http://panel:8765/setup?t=…" --> SP
-    SP["setup page<br/>(this bundle, port 8765)"] -- "2 302 to the consent screen<br/>(PKCE, state)" --> G["Google<br/>accounts.google.com"]
+    SP["setup page<br/>(this bundle, port 8765)"] -- "2 read only, or read and change:<br/>a link to the consent screen (PKCE, state)" --> G["Google<br/>accounts.google.com"]
     G -- "3 302 with code and state" --> RP["relay page<br/>pages/oauth (https)"]
     RP -- "4 http://panel:8765/callback?code&state" --> SP
     SP -- "5 code + verifier" --> T["oauth2.googleapis.com/token"]
+    CB -- "8 unlink: the grant ended" --> R["oauth2.googleapis.com/revoke"]
     CB["CalendarServiceBundle"] -- "6 Events:list, every minute" --> API["www.googleapis.com<br/>Calendar API"]
     CB -. "topic agenda" .-> DB["DashboardServiceBundle"]
     DB -- "binder: publishAgenda" --> APP["the panel"]
+    APP -- "binder: onCalendarCommand" --> DB
+    DB -- "SDV RPC: CalendarService" --> CB
+    CB -- "7 events.get, events.patch, events.delete" --> API
     CB <-- "grant.json, agenda.pb,<br/>oauth-client.json" --> ST[("/data/service_bundle_data/<br/>com.everyware.calendar/<br/>CalendarServiceBundle")]
 ```
 
@@ -43,8 +50,10 @@ uses the flow of a web application, with no server of its own:
    and publishes its URL, `http://<panel's address>:8765/setup?t=<one-time token>`, in the
    agenda (`setup_url`). The screen shows it as a QR code.
 2. The phone opens it. The page takes the token (once), begins a flow (a nonce and a PKCE
-   verifier, kept in the bundle) and sends the phone to Google's consent screen with the
-   challenge and the state: base64url of `{"p": "<panel's address>:8765", "n": "<nonce>"}`.
+   verifier, kept in the bundle) and asks what the panel may do with the calendar: **read only**
+   (first, recommended) or **read and change**. Each answer is a link to Google's consent screen
+   with the scopes of that access, the challenge and the state: base64url of
+   `{"p": "<panel's address>:8765", "n": "<nonce>"}`. Both links belong to the same flow.
 3. Google sends the phone to the client's redirect URI, the relay page, with the code and the
    state. Google takes only an https address there, and the panel has none.
 4. The relay page reads the panel's address from the state and sends the phone on to
@@ -54,25 +63,43 @@ uses the flow of a web application, with no server of its own:
    at Google's token endpoint, keeps the refresh token, closes the setup page and reads the
    calendar at once. The phone shows "Done. You can close this page."
 
-The scope is `calendar.events.readonly`: Google grants read access to the events of every calendar
-of the account; the code reads the primary calendar only. The tokens never leave the panel. The
-relay page sees the code of the panel's own flow, which is useless without the panel's verifier
-and the client secret.
+The tokens never leave the panel. The relay page sees the code of the panel's own flow, which is
+useless without the panel's verifier and the client secret.
+
+## The access
+
+| The owner chooses | The request asks for | The panel may |
+|---|---|---|
+| read only (the default) | `calendar.events.readonly` | show the events |
+| read and change | `calendar.events.readonly` and `calendar.events` | also answer invitations and delete the account's own events |
+
+Google grants the events of every calendar of the account; the code reads and changes the primary
+calendar only. What decides is the scope Google **granted**, not the choice: the token answer's
+`scope`, kept with the refresh token in `grant.json` and published as `Agenda.can_change`. The
+consent screen lets the owner untick a scope; "read and change" asks for both so that unticking
+the change still links the calendar, for reading. A refresh that names other scopes replaces the
+kept ones, and a change Google refuses for a missing scope (403 `insufficientPermissions`) makes
+the grant read only. A grant kept before the choice existed has no scope and counts as read only.
+To change the access, the panel unlinks the account and links it again (next section): the setup
+page asks for the choice once more.
 
 ## What goes where
 
 | | |
 |---|---|
 | topic `agenda` (`Agenda`) | the link (`CALENDAR_NO_CLIENT`, `CALENDAR_NOT_CONNECTED`, `CALENDAR_CONNECTED`, `CALENDAR_EXPIRED`), the setup URL while there is no account, the calendar's title, up to 40 events in Google's order, the time of the last read |
-| an event (`AgendaEvent`) | Google's id, title, place, start and end (unix seconds; an all-day event at 00:00 UTC, the end exclusive), all day or not, the event's own colour from Google's event palette (0: none, the screen's default), its description and its video meeting link (for the details a tap opens) |
+| an event (`AgendaEvent`) | Google's id, title, place, start and end (unix seconds; an all-day event at 00:00 UTC, the end exclusive), all day or not, the event's own colour from Google's event palette (0: none, the screen's default), its description and its video meeting link (for the details a tap opens), the account's answer to its invitation, whether it is an occurrence of a recurring event, and what the screen may change of it (`can_respond`, `can_delete`) |
+| the account's answer (`response`) | its own attendee's `responseStatus` when it is a guest and not the organizer (`organizer.self`); `RSVP_NONE` for its own events and for events it is not a guest of |
+| `can_respond`, `can_delete` | with `Agenda.can_change` only: an answer when the account is a guest and not the organizer, a deletion when it is the organizer; never for a private or confidential event, for one that is not an ordinary event (`eventType` other than `default`: a birthday, an event from Gmail, out of office, focus time, a working location) or for an id that is not Google's whole id (longer than the catalog's 128 bytes) |
 | the description | plain text, at most 2000 bytes: Google keeps one written in Calendar's editor as HTML, so the tags are taken out (a line break for `<br>`, a line of their own for paragraphs, `div`s and list items, "• " before an item), the entities decoded, control and direction characters taken out except the line break, no more than one blank line in a row, cut at a character with an ellipsis |
-| the meeting link | the Google Meet link (`hangoutLink`), else the first video entry point of the conference data (Zoom, Teams); https only, at most 256 bytes, else empty |
+| the meeting link | the Google Meet link (`hangoutLink`), else the first video entry point of the conference data (Zoom, Teams); https only, at most 256 bytes, only the characters of RFC 3986 (no backslash, which a browser takes for a `/`) and no user part, so that it reads as the host it opens; else empty |
 | a private or confidential event | the title "Busy", no place, no description, no meeting link |
 | a recurring event | each occurrence of the seven days is an event (`singleEvents=true`) |
 | a cancelled event, an invitation the account declined | not in the agenda (`fields` asks for the account's own answer only: `attendees(self,responseStatus)`, `maxAttendees=1`) |
 | the order | Google's (`orderBy=startTime`): by start in the calendar's time zone, an all-day event at the start of its day there. The bundle does not sort again: an all-day event's 00:00 UTC is 19:00 the day before in New York, so sorted by it Tuesday's holiday would come before Monday's dinner |
 | `oauth-client.json` | the owner's OAuth client, Google's downloaded JSON; put there by `scripts/calendar-client.sh`; never in git or in the image |
-| `grant.json` | the client's id and the refresh token, mode 0600 |
+| `grant.json` | the client's id, the refresh token and the granted scopes, mode 0600 |
+| `grants-replaced.json` | the grants of OAuth clients the owner replaced, until Google ended them, mode 0600 |
 | `agenda.pb` | the last agenda, mode 0600 (titles, places, the account's address), published again at the next start |
 | `setup-url` | while the setup page is open: its URL with the one-time token, mode 0600, for the development flow |
 
@@ -87,7 +114,10 @@ The owner of the panel makes the client in the Google Cloud console:
 1. A project, the Google Calendar API turned on, the OAuth consent screen (External), and the
    owner's account as a test user, or the app published "In production". In "Testing" Google
    ends a refresh token after seven days, and the panel shows `CALENDAR_EXPIRED`. Published
-   without Google's verification, the consent screen warns that the app is not verified.
+   without Google's verification, the consent screen warns that the app is not verified. The
+   consent screen's "Data access" page lists the scopes the panel asks for:
+   `https://www.googleapis.com/auth/calendar.events.readonly`, and
+   `https://www.googleapis.com/auth/calendar.events` for "read and change".
 2. An OAuth client of the type "Web application". Its first redirect URI is the one the panel
    uses: the relay page (`https://<where the page is hosted>/oauth/`), or
    `http://localhost:8765/callback` for development.
@@ -118,6 +148,82 @@ file again restarts the bundle). The events of before are dropped, so the screen
 old week as current. While the reads only fail for a while, the screen can tell an old agenda
 by `updated`; `updated` 0 with `CALENDAR_CONNECTED` means not read yet, not an empty week, and
 with `read_failed` that the reads fail.
+
+## Changes from the screen
+
+With `Agenda.can_change` the event panel of the screen offers what an event allows: Accept, Maybe
+and Decline on an invitation (`can_respond`, the current answer marked), Delete on the account's
+own event (`can_delete`, after a confirmation on the screen; for a recurring event it deletes this
+occurrence only). The screen sends a `CalendarCommand` through the dashboard bundle
+(`ICommandSink.onCalendarCommand`), which calls `CalendarService.Respond` or `Delete` on this
+bundle (SDV RPC, channel `calendar`) and hands the answer back
+(`IScreenLink.publishCalendarResult`).
+
+A change passes these checks, in this order (`client/src/change.rs`):
+
+1. The caller is the dashboard bundle (its SDV identity, `com.everyware.dashboard`,
+   `DashboardServiceBundle`): the authz policy lets any bundle that declares itself a client call.
+2. The id is an event id as Google writes it (letters, digits, `_`, `-`, at most 128 bytes): only
+   such an id goes into a URL. An answer is accepted, tentative or declined.
+3. The agenda published last has the event and allows the change (`can_change`, then
+   `can_respond` or `can_delete`).
+4. Google's event as it is now (events.get) still allows it: not cancelled, the same rule as the
+   agenda's.
+
+Then the change, on that version of the event only (`If-Match` with its ETag; when it changed in
+between, it is read again once):
+
+| | the call | Google tells |
+|---|---|---|
+| an answer | events.patch of the occurrence with the attendees as events.get gave them, the account's own `responseStatus` changed (a patch replaces the whole list; with `attendeesOmitted` when Google left guests out, so only the account's answer changes); nothing when the answer is the one asked for already | the organizer (`sendUpdates=all`) |
+| a deletion | events.delete of the occurrence | the guests (`sendUpdates=all`) |
+
+When the change was made, or Google said something about the event or the access, the bundle
+reads the calendar at once and publishes the new agenda, then answers (`CalendarResult`):
+
+| Google's answer | `CalendarFailure` |
+|---|---|
+| done | none (`ok`) |
+| 403 `insufficientPermissions` (the grant becomes read only, `can_change` false in the next agenda) | `READ_ONLY` |
+| 404, 410, a cancelled event, an event no longer in the agenda | `GONE` |
+| the event does not allow it any more, a malformed request | `NOT_ALLOWED` |
+| another 4xx (a forbidden change, the API turned off) | `REFUSED` |
+| no network, 429, 5xx, a quota, 412 twice, no answer within 40 s | `AGAIN` |
+| no account, the grant revoked | `NOT_LINKED` |
+
+A 401 renews the access token once. A change waits in a queue of four at most. The loop takes it
+within 70 s (it may be in a read of the agenda), or it is not made at all and the answer is
+`AGAIN` ("the calendar is busy; nothing was changed"): a change the screen was told failed is
+never made later. From the moment the loop takes it the answer comes within 65 s: the change
+within 40 s, the read of the agenda after it holds the answer back 20 s at most (a slower read is
+not cancelled: the answer goes, the read goes on, and its agenda follows the answer). The dashboard bundle waits 150 s, the panel 160 s.
+A change whose 40 s run out is answered `AGAIN` although Google may have made it; the next read
+shows what Google has.
+
+## Unlinking the account
+
+`CalendarService.Disconnect`, with read or write access alike: the screen's "Disconnect" and
+"Change access" (both after a confirmation on the screen). The same caller check as a change.
+
+1. The bundle ends the grant at Google: its refresh token posted to
+   `https://oauth2.googleapis.com/revoke` (the whole grant ends, every token of it). Google saying
+   `invalid_token` (ended before) counts as ended.
+2. Only then `grant.json` is removed and `agenda.pb` holds `CALENDAR_NOT_CONNECTED`, so a restart
+   shows the setup page, not the old week. The agenda `CALENDAR_NOT_CONNECTED` goes out, then the
+   answer (ok).
+3. The setup page opens with a new one-time token and asks for the access again.
+
+When Google cannot be told (no network, Google busy, no answer within 40 s) nothing changes: the
+account stays linked and the answer is `AGAIN`. Without an account the answer is `NOT_LINKED`.
+
+The panel also ends the grants it does not keep, so that none stays among the account's
+third-party access with nobody holding it: on the setup page an exchange whose consent left out
+the calendar, one without a refresh token, and the second of two sign-ins at the same time; and
+the grants of an OAuth client the owner replaced (useless with the new client). Those are moved
+out of `grant.json` into `grants-replaced.json` (0600, eight at most) before anything else, so a
+new link cannot overwrite one before Google ended it; each is ended at Google, in a task of its
+own so that the saved agenda, the setup page and the changes never wait for Google, at every pass of
+the bundle's loop and at every start until Google was told, then forgotten.
 
 ## Development without the relay page
 
@@ -157,19 +263,25 @@ its own script only, by hash, and no referrer leaves it. Where it is hosted is n
 - `client/` (`libeveryware_calendar_client`, host test `everyware_calendar_client_test`), every
   decision with its test:
   - `link.rs`: one read (`Session`: the access token renewed before it ends and once more after a
-    401, a new refresh token kept at once) and what each outcome leaves and publishes (`Link`).
+    401, a new refresh token and the granted scope kept at once), one change
+    (`Session::change`), and what each outcome leaves and publishes (`Link`).
+  - `change.rs`: the screen's changes: the caller, the request, the agenda's rule and Google's
+    event checked, the calls (events.get, events.patch, events.delete) and Google's refusals.
   - `server.rs`: the setup page's connections (the head bounded and read in time, the
     connections capped, the code exchanged, how the setup ends).
   - `google.rs`: Google as a trait; the bundle uses HTTPS, the tests a script.
-  - `oauth.rs`: the client file, PKCE, the authorization URL, the state, the nonces and the
-    setup token, the token endpoint's answers. `setup.rs`: the setup page's requests and
-    answers. `events.rs`: Events:list as the agenda, the API's errors. `time.rs`: RFC 3339.
-    `net.rs`: the panel's address.
-- `libs/https`: `post_form` for the token endpoint, `get_bearer` for the Calendar API.
+  - `oauth.rs`: the client file, the access and the granted scope, PKCE, the authorization URL,
+    the state, the nonces and the setup token, the token endpoint's answers. `setup.rs`: the
+    setup page's requests and answers (the choice of access). `events.rs`: Events:list as the
+    agenda, what an event allows, the API's errors. `time.rs`: RFC 3339. `net.rs`: the panel's
+    address.
+- `libs/https`: `post_form` for the token endpoint, `get_bearer` for the Calendar API's reads,
+  `bearer` for its changes (a method, `If-Match`, a JSON body).
 - `libs/bundle-store`: the grant (`save_private`, 0600, written to a temporary file and
   renamed), the last agenda, the client file.
 - `apex/`: manifest, orchestration (started at boot, instance-1), the authorization policy
-  (`publisher` of `agenda`), test keys (public repository: not for a product).
+  (`publisher` of `agenda`, `server` of `CalendarService`), test keys (public repository: not for
+  a product).
 
 ## Timing
 
@@ -181,6 +293,8 @@ its own script only, by hash, and no referrer leaves it. Where it is hosted is n
 | right after the link, then every minute | the agenda (a new event is on the screen within a minute) |
 | a read that fails | the last agenda stays; tried again after 2 s, then twice as long each time up to 5 minutes (the network comes some seconds after the bundle at boot; an outage of Google, 429 or 5xx, is asked some 20 times an hour, not every minute) |
 | Google refuses the client | `CALENDAR_NO_CLIENT` without events, until the client file changes |
+| a change of the screen | made between two reads; the agenda read at once after it and published before the answer |
+| an unlink from the screen | `CALENDAR_NOT_CONNECTED` once Google ended the grant, then the setup URL as at the first link |
 
 The access token (an hour) is renewed two minutes before it ends, and when the API refuses it.
 
@@ -206,9 +320,22 @@ state, so the relay page sends the phone back to the same one.
 ## Security
 
 - The refresh token is the key to the account's events, of all its calendars (the scope is not
-  narrower than that; the code reads the primary one). It is in the bundle's directory only
-  (SDV's `service_bundle_data`, the bundle's uid, mode 0600), never published, never in the log.
-  The scope is read-only.
+  narrower than that; the code reads and changes the primary one). It is in the bundle's
+  directory only (SDV's `service_bundle_data`, the bundle's uid, mode 0600), never published,
+  never in the log. Read only by default; with "read and change" whoever holds it can also change
+  and delete every event of the account, not only what the panel offers.
+- Write access is given to a shared screen: everyone at the panel can answer the owner's
+  invitations and delete the owner's events, and Google sends the answer and the cancellation to
+  the others in the owner's name. The owner chooses it on the setup page (read only first and
+  recommended, the page says that anyone at the panel can change), and may untick it on Google's
+  consent screen. A deletion needs a confirmation on the screen; nothing else stands between a
+  tap and Google.
+- The screen cannot reach Google directly or name any event: the calendar bundle takes a change
+  only from the dashboard bundle (SDV identity, not only the authz policy), only for an id of the
+  agenda it published itself, only with the access Google granted, and checks the rule again on
+  Google's current event before it changes it on that version (`If-Match`). An id goes into a URL
+  only when it is letters, digits, `_` and `-`. Private and confidential events, and events
+  other than ordinary ones, are never changed from the screen.
 - The setup page is plain HTTP on the local network, open only while a client is there and no
   account is linked. Its token is random (32 bytes), good once and for ten minutes (a replaced
   one for one more minute), so only someone who sees the screen can begin a link of the panel.
@@ -224,8 +351,11 @@ state, so the relay page sends the phone back to the same one.
 - What it does not do either: a person who reads the Wi-Fi traffic while the owner opens the
   setup page sees the challenge and the state in the redirect, can finish that flow with his own
   account first, and the panel then links his calendar (no access to the owner's data, but his
-  agenda on the screen). The screen shows the linked calendar's title (the account's address);
-  there is no confirm or undo on the panel yet.
+  agenda on the screen). The undo is the panel's "Disconnect" (CalendarService.Disconnect, its
+  grant ended at Google); there is no confirm of the linked account before it shows.
+- Anyone at the panel can unlink the account (after the confirmation on the screen): the agenda
+  is gone until the owner links again, and the setup page that opens lets whoever sees the
+  screen link an account (as at the first link).
 - The setup page answers GET on `/setup` and `/callback` only, reads at most 4 kB of a request
   in 10 s, serves 8 connections at a time, and its pages run nothing (`default-src 'none'`),
   are not cached and send no referrer. It closes a connection by dropping it: `shutdown()` is not
@@ -243,7 +373,10 @@ state, so the relay page sends the phone back to the same one.
   PIN, a document link. It goes to the shared screen as plain text only (HTML made text in the
   bundle, in linear time: a crafted description costs its length), and the screen shows it only
   when someone taps the event. The meeting link is https only; a private or confidential event
-  has neither.
+  has neither. The meeting link is the organizer's choice (a third-party conference may carry
+  any https address): the panel shows it as text, and as a QR code only after a tap on Join on
+  phone, with the host the phone will open under the code ("Opens meet.google.com"), and only for
+  a host of plain ASCII letters, digits, dots and dashes.
 - A private or confidential event is "Busy" without its place: the panel is seen by everyone in
   the room. The calendar's title of a primary calendar is the account's address; the screen
   decides whether it shows it.
@@ -257,6 +390,22 @@ state, so the relay page sends the phone back to the same one.
 ## Testing
 
 - `everyware_calendar_client_test` (host):
+  - the changes: the caller (only the dashboard bundle), the request (ids that are not Google's,
+    no answer given), the agenda's rule (read only, gone, not allowed, no account), Google's
+    event (cancelled, made private, not the organizer, not a guest, not an ordinary event), the
+    patch body (the whole list back, only the account's answer changed, `attendeesOmitted`
+    carried, nothing when the answer is the one asked for), the URLs (`sendUpdates=all`,
+    `If-Match`), Google's refusals mapped, a 401 renewing the token once, a 412 reading again
+    once, the network, a revoked grant, a read-only answer making the grant read only (0600);
+  - the unlink: the grant ended at Google before it is forgotten, not connected after a restart,
+    the account kept when Google cannot be told; the grants the panel does not keep ended (a
+    consent without the calendar, no refresh token, a second sign-in); a replaced client's grant
+    set aside so that a new link cannot overwrite it, kept until it is ended (at most eight);
+    the revocation endpoint's answers (`invalid_token` counts as ended);
+  - the access: the scopes asked for per choice, the scope Google granted (read, change, neither),
+    the granted scope kept with the grant and taken from a refresh, an old grant read only, no
+    event offering a change without it, what an event allows (organizer, guest, recurring,
+    private, Gmail and out-of-office events, ids);
   - the link: a 401 gives one refresh and one more read, the access token renewed before it
     ends, a new refresh token kept at once (0600), `invalid_grant` and a lost scope end in
     `CALENDAR_EXPIRED` (also after a restart), a refused client and the Calendar API turned off
@@ -264,8 +413,9 @@ state, so the relay page sends the phone back to the same one.
     again, the last agenda at a start (a day old at most), a grant of another client not taken,
     a read a minute and the backoff after failures (an hour of outage is at most 20 requests), an
     unchanged agenda not written every minute, the setup URL file (0600, removed);
-  - the setup page's connections: from the QR code to the grant (the address the phone reached
-    in the state, the exchange with the verifier of the challenge), a token used once, a refused
+  - the setup page's connections: from the QR code to the grant (the choice of access with its
+    two links of one flow, the address the phone reached in the state, the exchange with the
+    verifier of the challenge, the granted scope in the grant), a token used once, a refused
     client ends the setup, the head bounded to 4 kB, a slow request closed without an answer, a
     connection over the limit closed at once (on loopback sockets);
   - the client JSON, PKCE with RFC 7636's vector, the authorization URL, the state there and
@@ -278,3 +428,5 @@ state, so the relay page sends the phone back to the same one.
   `adb logcat -s calendar_bundle` should show "no OAuth client", "the setup page: open on
   192.168.1.23:8765", "the setup page: a link begins", "the account is linked", "12 events in
   the next 7 days"; the bridge, `-s dashboard_bundle`, "agenda: CALENDAR_CONNECTED, 12 events".
+  A change: "Delete { event_id: \"…\" }: made" in the bundle, "calendar delete \"…\": ok true" in
+  the bridge.

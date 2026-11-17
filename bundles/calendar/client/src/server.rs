@@ -20,7 +20,7 @@
 //! may do on a socket.
 
 use crate::google::Google;
-use crate::oauth::{self, AuthError, ClientConfig, Flows, Grant, SetupToken, State, Tokens};
+use crate::oauth::{self, Access, AuthError, ClientConfig, Flows, Grant, SetupToken, State, Tokens};
 use crate::setup::{self, Reject, Request, PORT};
 use log::{info, warn};
 use std::net::{Ipv4Addr, SocketAddr};
@@ -137,19 +137,22 @@ impl<G: Google + 'static> SetupPage<G> {
                 let Some(SocketAddr::V4(local)) = local else {
                     return setup::page("500 Internal Server Error", "The panel does not know its address.");
                 };
-                let url = {
+                // one flow, two ways into it: whichever the owner takes, Google's grant says what
+                // the panel may do (the owner may untick the change on the consent screen)
+                let (read, change) = {
                     let mut state = self.state.lock().expect("setup state");
                     let now = Instant::now();
                     if !state.0.take(&token, now) {
                         return setup::page("403 Forbidden", &format!("This link is old or was used. {AGAIN}"));
                     }
                     let (nonce, pkce) = state.1.begin(now);
-                    let flow = State { panel: local.to_string(), nonce };
-                    oauth::auth_url(&self.client, &pkce.challenge, &flow.encode())
+                    let flow = State { panel: local.to_string(), nonce }.encode();
+                    let url = |access| oauth::auth_url(&self.client, access, &pkce.challenge, &flow);
+                    (url(Access::Read), url(Access::Change))
                 };
                 let _ = self.used.send(());
-                info!("the setup page: a link begins, to Google's consent screen");
-                setup::redirect(&url)
+                info!("the setup page: a link begins, the choice of access");
+                setup::choice(&read, &change)
             }
             Request::Denied { error, state } => {
                 if let Some(flow) = State::decode(&state) {
@@ -164,16 +167,31 @@ impl<G: Google + 'static> SetupPage<G> {
                     info!("the setup page: an answer of no open flow");
                     return setup::page("400 Bad Request", &format!("This sign-in is old, was used or is not of this panel. {AGAIN}"));
                 };
+                // a grant the panel does not keep is ended at Google: nobody would hold it, and it
+                // would stay among the account's third-party access
                 match self.google.exchange(&self.client, &code, &verifier).await {
+                    Ok(tokens) if tokens.calendar().is_err() => {
+                        info!("the setup page: the calendar permission was not granted");
+                        self.end_grant(tokens.revocable()).await;
+                        setup::page("403 Forbidden", &format!("The calendar permission was not granted. {AGAIN}"))
+                    }
                     Ok(tokens) => {
                         let Some(refresh_token) = tokens.refresh_token.clone() else {
                             warn!("the setup page: Google sent no refresh token");
+                            self.end_grant(tokens.revocable()).await;
                             return setup::page("502 Bad Gateway", &format!("Google sent no lasting access. {AGAIN}"));
                         };
-                        let grant = Grant { client_id: self.client.client_id.clone(), refresh_token };
+                        let scope = tokens.scope.clone().unwrap_or_default();
+                        info!("the setup page: Google grants {:?} access", Access::granted(&scope).unwrap_or(Access::Read));
+                        let grant = Grant { client_id: self.client.client_id.clone(), refresh_token, scope };
                         match self.end.try_send(SetupEnd::Linked(grant, tokens)) {
                             Ok(()) => setup::page("200 OK", "Done. You can close this page."),
-                            Err(_) => setup::page("409 Conflict", "The panel was linked by another sign-in just now."),
+                            Err(lost) => {
+                                if let SetupEnd::Linked(grant, _) = lost.into_inner() {
+                                    self.end_grant(&grant.refresh_token).await;
+                                }
+                                setup::page("409 Conflict", "The panel was linked by another sign-in just now.")
+                            }
                         }
                     }
                     Err(AuthError::Scope) => {
@@ -191,6 +209,17 @@ impl<G: Google + 'static> SetupPage<G> {
                     }
                 }
             }
+        }
+    }
+}
+
+impl<G: Google> SetupPage<G> {
+    /// Ends at Google a grant the panel does not keep; when Google cannot be told, the owner
+    /// removes it among the account's third-party access.
+    async fn end_grant(&self, token: &str) {
+        match self.google.revoke(token).await {
+            Ok(()) => info!("the setup page: the grant the panel does not keep is ended at Google"),
+            Err(err) => warn!("the setup page: a grant the panel does not keep could not be ended at Google ({err})"),
         }
     }
 }
@@ -218,21 +247,25 @@ async fn read_head<S: AsyncRead + Unpin>(stream: &mut S) -> Result<Vec<u8>, Reje
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::change::ApiCall;
     use crate::events::{ApiError, Read};
-    use crate::oauth::Pkce;
+    use crate::oauth::{Pkce, CHANGE_SCOPE, READ_SCOPE};
+    use everyware_https::Reply;
     use std::collections::HashMap;
     use tokio::io::duplex;
     use tokio::net::TcpListener;
 
-    /// Google whose token endpoint gives one scripted answer and writes down the verifiers.
+    /// Google whose token endpoint gives one scripted answer and writes down the verifiers and
+    /// the tokens whose grant was ended.
     struct Exchange {
         answer: Mutex<Option<Result<Tokens, AuthError>>>,
         verifiers: Mutex<Vec<String>>,
+        revoked: Mutex<Vec<String>>,
     }
 
     impl Exchange {
         fn new(answer: Result<Tokens, AuthError>) -> Exchange {
-            Exchange { answer: Mutex::new(Some(answer)), verifiers: Mutex::default() }
+            Exchange { answer: Mutex::new(Some(answer)), verifiers: Mutex::default(), revoked: Mutex::default() }
         }
     }
 
@@ -247,8 +280,17 @@ mod tests {
             unreachable!("no refresh on the setup page")
         }
 
+        async fn revoke(&self, token: &str) -> Result<(), AuthError> {
+            self.revoked.lock().unwrap().push(token.to_string());
+            Ok(())
+        }
+
         async fn events(&self, _: &str, _: i64) -> Result<Read, ApiError> {
             unreachable!("no events on the setup page")
+        }
+
+        async fn call(&self, _: &str, _: &ApiCall) -> Result<Reply, String> {
+            unreachable!("no change on the setup page")
         }
     }
 
@@ -257,7 +299,7 @@ mod tests {
     }
 
     fn tokens() -> Tokens {
-        Tokens { access_token: "ya29.a".into(), expires_in: 3599, refresh_token: Some("1//r".into()) }
+        Tokens { access_token: "ya29.a".into(), expires_in: 3599, refresh_token: Some("1//r".into()), scope: Some(READ_SCOPE.into()) }
     }
 
     fn page(answer: Result<Tokens, AuthError>, limits: Limits) -> (Arc<SetupPage<Arc<Exchange>>>, PageEvents, Arc<Exchange>) {
@@ -290,19 +332,32 @@ mod tests {
         form_urlencoded::parse(url.split_once('?').unwrap().1.as_bytes()).into_owned().collect()
     }
 
+    /// The links of the choice page, in their order, unescaped.
+    fn links(answer: &str) -> Vec<String> {
+        answer.split("href=\"").skip(1).map(|rest| rest.split('"').next().unwrap().replace("&amp;", "&")).collect()
+    }
+
     #[tokio::test]
     async fn from_the_qr_code_to_the_grant() {
         let (page, mut events, google) = page(Ok(tokens()), Limits::default());
         let url = page.url(Ipv4Addr::new(192, 168, 1, 23));
         assert!(url.starts_with("http://192.168.1.23:8765/setup?t="), "{url}");
         let answer = ask(&page, &get(&format!("/setup?t={}", token_of(&url)))).await;
-        assert!(answer.starts_with("HTTP/1.1 302 Found\r\n"), "{answer}");
+        assert!(answer.starts_with("HTTP/1.1 200 OK\r\n"), "{answer}");
         // a new token for the QR code
         assert!(events.used.try_recv().is_ok());
         assert_ne!(page.url(Ipv4Addr::new(192, 168, 1, 23)), url);
-        // to Google with the address the phone reached, PKCE and the nonce
-        let location = answer.lines().find_map(|l| l.strip_prefix("Location: ")).unwrap();
-        let q = query(location);
+        // the choice: read only first, then read and change; one flow, the same state and
+        // challenge, to Google with the address the phone reached
+        let links = links(&answer);
+        assert_eq!(links.len(), 2, "{answer}");
+        let (read, change) = (query(&links[0]), query(&links[1]));
+        assert!(links[0].starts_with(oauth::AUTH_ENDPOINT));
+        assert_eq!(read["scope"], READ_SCOPE);
+        assert_eq!(change["scope"], format!("{READ_SCOPE} {CHANGE_SCOPE}"));
+        assert_eq!((&read["state"], &read["code_challenge"]), (&change["state"], &change["code_challenge"]));
+        // the owner takes "read and change"
+        let q = change;
         let flow = State::decode(&q["state"]).unwrap();
         assert_eq!(flow.panel, PANEL);
         // the relay page sends the phone back with the code
@@ -312,12 +367,58 @@ mod tests {
         // the exchange had the verifier of the challenge that went to Google
         let verifier = google.verifiers.lock().unwrap()[0].clone();
         assert_eq!(Pkce::of(verifier).challenge, q["code_challenge"]);
+        // what Google granted is kept with the grant (here the owner unticked the change)
         match events.end.try_recv().unwrap() {
-            SetupEnd::Linked(grant, t) => assert_eq!((grant.client_id.as_str(), grant.refresh_token.as_str(), t), ("id-1", "1//r", tokens())),
+            SetupEnd::Linked(grant, t) => {
+                assert_eq!((grant.client_id.as_str(), grant.refresh_token.as_str(), t), ("id-1", "1//r", tokens()));
+                assert_eq!((grant.scope.as_str(), grant.access()), (READ_SCOPE, Access::Read));
+            }
             other => panic!("{other:?}"),
         }
         // the flow is over: the same answer again is refused
         assert!(ask(&page, &get(&callback)).await.starts_with("HTTP/1.1 400 "));
+    }
+
+    /// The setup page's state for a new flow: the QR code scanned, the first link's query.
+    async fn begin<G: Google + 'static>(page: &SetupPage<G>) -> HashMap<String, String> {
+        let answer = ask(page, &get(&format!("/setup?t={}", token_of(&page.url(Ipv4Addr::LOCALHOST))))).await;
+        query(&links(&answer)[0])
+    }
+
+    #[tokio::test]
+    async fn a_grant_the_panel_does_not_keep_is_ended_at_google() {
+        // the owner unticked the calendar: the grant Google made anyway is ended
+        {
+            let unticked = Tokens { scope: Some("openid email".into()), ..tokens() };
+            let (page, mut events, google) = page(Ok(unticked), Limits::default());
+            let state = begin(&page).await["state"].clone();
+            let answer = ask(&page, &get(&format!("/callback?code=c&state={state}"))).await;
+            assert!(answer.starts_with("HTTP/1.1 403 ") && answer.contains("not granted"), "{answer}");
+            assert_eq!(*google.revoked.lock().unwrap(), ["1//r"]);
+            assert!(events.end.try_recv().is_err(), "nothing linked");
+        }
+        // no refresh token: the access token ends the grant
+        {
+            let (page, _events, google) = page(Ok(Tokens { refresh_token: None, ..tokens() }), Limits::default());
+            let state = begin(&page).await["state"].clone();
+            assert!(ask(&page, &get(&format!("/callback?code=c&state={state}"))).await.starts_with("HTTP/1.1 502 "));
+            assert_eq!(*google.revoked.lock().unwrap(), ["ya29.a"]);
+        }
+        // linked by another sign-in just now: the second grant is ended
+        {
+            let (page, _events, google) = page(Ok(tokens()), Limits::default());
+            page.end.try_send(SetupEnd::Refused("the first end".into())).unwrap();
+            let state = begin(&page).await["state"].clone();
+            assert!(ask(&page, &get(&format!("/callback?code=c&state={state}"))).await.starts_with("HTTP/1.1 409 "));
+            assert_eq!(*google.revoked.lock().unwrap(), ["1//r"]);
+        }
+        // a grant that is kept is not ended
+        {
+            let (page, _events, google) = page(Ok(tokens()), Limits::default());
+            let state = begin(&page).await["state"].clone();
+            assert!(ask(&page, &get(&format!("/callback?code=c&state={state}"))).await.starts_with("HTTP/1.1 200 "));
+            assert!(google.revoked.lock().unwrap().is_empty());
+        }
     }
 
     #[tokio::test]
@@ -325,7 +426,7 @@ mod tests {
         let (page, _events, _) = page(Ok(tokens()), Limits::default());
         let token = token_of(&page.url(Ipv4Addr::LOCALHOST));
         assert!(ask(&page, &get("/setup?t=wrong")).await.starts_with("HTTP/1.1 403 "));
-        assert!(ask(&page, &get(&format!("/setup?t={token}"))).await.starts_with("HTTP/1.1 302 "));
+        assert!(ask(&page, &get(&format!("/setup?t={token}"))).await.starts_with("HTTP/1.1 200 "));
         assert!(ask(&page, &get(&format!("/setup?t={token}"))).await.starts_with("HTTP/1.1 403 "));
     }
 
@@ -333,7 +434,7 @@ mod tests {
     async fn a_refused_client_ends_the_setup() {
         let (page, mut events, _) = page(Err(AuthError::Client("invalid_client: Unauthorized".into())), Limits::default());
         let answer = ask(&page, &get(&format!("/setup?t={}", token_of(&page.url(Ipv4Addr::LOCALHOST))))).await;
-        let state = query(answer.lines().find_map(|l| l.strip_prefix("Location: ")).unwrap())["state"].clone();
+        let state = query(&links(&answer)[0])["state"].clone();
         let answer = ask(&page, &get(&format!("/callback?code=c&state={state}"))).await;
         assert!(answer.starts_with("HTTP/1.1 502 ") && answer.contains("refused the panel"), "{answer}");
         assert!(matches!(events.end.try_recv().unwrap(), SetupEnd::Refused(why) if why.contains("invalid_client")));

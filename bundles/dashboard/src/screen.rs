@@ -24,6 +24,7 @@ pub enum ScreenCommand {
     Wifi(Vec<u8>),
     Matter(Vec<u8>),
     Settings(Vec<u8>),
+    Calendar(Vec<u8>),
 }
 
 /// The panel's end while it is there, and this bundle's command sink.
@@ -142,6 +143,10 @@ impl Screen {
         self.publish("agenda", agenda, |link, bytes| link.publishAgenda(bytes));
     }
 
+    pub fn publish_calendar_result<M: Message>(&self, command: &str, event_id: &str, result: &M) {
+        self.publish("calendar result", result, |link, bytes| link.publishCalendarResult(command, event_id, bytes));
+    }
+
     /// One call to the panel; dropped while it is not linked (connect sends the last values).
     fn publish<M: Message>(&self, what: &str, message: &M, call: impl FnOnce(&Strong<dyn IScreenLink>, &[u8]) -> binder::Result<()>) {
         // Only to a panel that took the sink: it takes a value on the same caller check, and
@@ -190,6 +195,11 @@ impl ICommandSink for Sink {
 
     fn onSettingsChange(&self, request: &[u8]) -> binder::Result<()> {
         let _ = self.commands.send(ScreenCommand::Settings(request.to_vec()));
+        Ok(())
+    }
+
+    fn onCalendarCommand(&self, command: &[u8]) -> binder::Result<()> {
+        let _ = self.commands.send(ScreenCommand::Calendar(command.to_vec()));
         Ok(())
     }
 }

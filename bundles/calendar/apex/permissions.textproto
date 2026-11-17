@@ -13,10 +13,14 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# What CalendarServiceBundle may do on the SDV middleware: publish the agenda. The same topic
-# as in catalog/everyware.vsidl.
+# What CalendarServiceBundle may do on the SDV middleware: publish the agenda and serve the
+# CalendarService. The same topic and service as in catalog/everyware.vsidl.
 
 publisher {
   message: "com.everyware.Agenda"
   topic: "agenda"
+}
+server {
+  service: "com.everyware.CalendarService"
+  channel: "calendar"
 }

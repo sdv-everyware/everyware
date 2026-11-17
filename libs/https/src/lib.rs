@@ -3,8 +3,8 @@
 //! stack per process: `bssl_sys` cannot be linked twice, so no rustls). The server's certificate
 //! is checked against the system CA store and the host name. HTTPS only, HTTP/1.1, one connection
 //! per request, the body limited in size and the whole request in time. `get` follows redirects
-//! and takes only a success; `post_form` and `get_bearer` (an API with OAuth) follow none and
-//! hand back any status with its body, because an API says in the body why it refused.
+//! and takes only a success; `post_form`, `get_bearer` and `bearer` (an API with OAuth) follow
+//! none and hand back any status with its body, because an API says in the body why it refused.
 
 use bytes::Bytes;
 use http_body_util::{BodyExt, Full};
@@ -139,6 +139,24 @@ pub async fn get_bearer(url: &str, token: &str, max_body: usize) -> Result<Reply
     let authorization = format!("Bearer {token}");
     let headers = [("authorization", authorization.as_str()), ("accept", "application/json")];
     timeout(TIMEOUT, reply(&url, Method::GET, &headers, Bytes::new(), max_body)).await.map_err(|_| "timeout")?
+}
+
+/// `method` (GET, PATCH, DELETE, ...) on `url` with the OAuth access token `token`, the condition
+/// `if_match` (an ETag: 412 when the resource changed since) and a JSON body: the answer whatever
+/// its status. No redirects.
+pub async fn bearer(method: &str, url: &str, token: &str, if_match: Option<&str>, json: Option<&str>, max_body: usize) -> Result<Reply> {
+    let url = Url::parse(url)?;
+    let method = Method::from_bytes(method.as_bytes())?;
+    let authorization = format!("Bearer {token}");
+    let mut headers = vec![("authorization", authorization.as_str()), ("accept", "application/json")];
+    if let Some(etag) = if_match {
+        headers.push(("if-match", etag));
+    }
+    if json.is_some() {
+        headers.push(("content-type", "application/json"));
+    }
+    let body = json.map(|j| Bytes::copy_from_slice(j.as_bytes())).unwrap_or_default();
+    timeout(TIMEOUT, reply(&url, method, &headers, body, max_body)).await.map_err(|_| "timeout")?
 }
 
 /// One request and its whole answer, whatever the status.
