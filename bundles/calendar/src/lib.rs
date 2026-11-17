@@ -439,21 +439,23 @@ async fn read_agenda(mut session: Session, link: &mut Link, out: &mut Output, ch
     let mut answer: Option<(Reply, CalendarResult)> = None;
     info!("reading the calendar every {} s", POLL_INTERVAL.as_secs());
     loop {
-        let read = session.read(&Live, link.store(), Instant::now(), unix_now());
-        tokio::pin!(read);
         // after a change the read holds the answer back READ_AFTER_CHANGE at most: then the
         // answer goes, and the read goes on (its agenda follows the answer)
-        let outcome = if answer.is_some() {
-            tokio::select! {
-                outcome = &mut read => outcome,
-                () = sleep(READ_AFTER_CHANGE) => {
-                    info!("the read after a change is slow: the answer goes first");
-                    send(answer.take());
-                    read.await
+        let outcome = {
+            let read = session.read(&Live, link.store(), Instant::now(), unix_now());
+            tokio::pin!(read);
+            if answer.is_some() {
+                tokio::select! {
+                    outcome = &mut read => outcome,
+                    () = sleep(READ_AFTER_CHANGE) => {
+                        info!("the read after a change is slow: the answer goes first");
+                        send(answer.take());
+                        read.await
+                    }
                 }
+            } else {
+                read.await
             }
-        } else {
-            read.await
         };
         let wait = match outcome {
             Outcome::Read(read) => {
