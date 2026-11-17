@@ -5,7 +5,8 @@ package com.everyware.screen;
  * calls the bundle that owns the device (SDV RPC) for each and hands the answer back with
  * IScreenLink.publishWifiResult or publishMatterResult. A settings change goes to user_preferences,
  * and the applied values come back with IScreenLink.publishSettings. A calendar change goes to the
- * calendar bundle, and the new agenda comes back with IScreenLink.publishAgenda.
+ * calendar bundle; the new agenda comes back with IScreenLink.publishAgenda, then the answer with
+ * IScreenLink.publishCalendarResult.
  */
 @VintfStability
 interface ICommandSink {

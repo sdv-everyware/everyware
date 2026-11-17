@@ -7,8 +7,8 @@
 //! bundle's sink: a Wi-Fi command (it may carry the password typed on the screen) becomes a call
 //! of the Wi-Fi bundle's `WifiService`, a Matter command one of the Matter bundle's
 //! `MatterService`, a calendar change one of the calendar bundle's `CalendarService` (SDV RPC,
-//! catalog/*_service.proto), and the answer goes back to the screen (the calendar's: the agenda
-//! the calendar bundle publishes after the change).
+//! catalog/*_service.proto), and the answer goes back to the screen (the calendar's after the
+//! agenda the calendar bundle publishes after the change).
 //!
 //! The bundle keeps the last value of every topic and sends it again when the panel comes back
 //! (it restarted and starts from nothing). Whether the link is up, the panel learns from binder:
@@ -586,7 +586,7 @@ async fn handle_commands(
                     warn!("a calendar command that does not parse");
                     continue;
                 };
-                tokio::spawn(call_calendar(services.calendar.get().cloned(), command));
+                tokio::spawn(call_calendar(screen.clone(), services.calendar.get().cloned(), command));
             }
         }
     }
@@ -640,18 +640,25 @@ fn failed(error: &str) -> WifiResult {
     result
 }
 
-/// One calendar change or the unlink of the account: the call, its answer in the log. The
-/// calendar bundle publishes the agenda after it before it answers, so the screen sees it on the
-/// agenda.
-async fn call_calendar(calendar: Option<Arc<CalendarClient>>, command: CalendarCommand) {
+/// One calendar change or the unlink of the account: the call, then its answer to the screen (a
+/// call that did not get through too: the screen must not wait for it). The calendar bundle
+/// publishes the agenda after the change before it answers.
+async fn call_calendar(screen: Arc<Screen>, calendar: Option<Arc<CalendarClient>>, command: CalendarCommand) {
     let (name, event_id) = match &command.command {
         Some(CalendarCmd::Respond(r)) => ("respond", r.event_id.clone()),
         Some(CalendarCmd::Delete(r)) => ("delete", r.event_id.clone()),
         Some(CalendarCmd::Disconnect(_)) => ("disconnect", String::new()),
         Some(_) | None => return,
     };
+    let again = |error: &str| {
+        let mut result = CalendarResult::new();
+        result.failure = everyware_catalog::calendar_service::CalendarFailure::CALENDAR_FAILURE_AGAIN.into();
+        result.error = error.to_string();
+        result
+    };
     let Some(calendar) = calendar else {
         warn!("calendar {name} {event_id:?}: the calendar service is not there yet");
+        screen.publish_calendar_result(name, &event_id, &again("the calendar service is not there yet"));
         return;
     };
     let answer: SdvResult<CalendarResult> = match command.command {
@@ -660,10 +667,17 @@ async fn call_calendar(calendar: Option<Arc<CalendarClient>>, command: CalendarC
         Some(CalendarCmd::Disconnect(r)) => calendar.Disconnect(&r).await,
         Some(_) | None => return,
     };
-    match answer {
-        Ok(result) => info!("calendar {name} {event_id:?}: ok {} {:?} {:?}", result.ok, result.failure, result.error),
-        Err(e) => warn!("calendar {name} {event_id:?}: the call failed: {e:?}"),
-    }
+    let result = match answer {
+        Ok(result) => {
+            info!("calendar {name} {event_id:?}: ok {} {:?} {:?}", result.ok, result.failure, result.error);
+            result
+        }
+        Err(e) => {
+            warn!("calendar {name} {event_id:?}: the call failed: {e:?}");
+            again("the calendar service did not answer")
+        }
+    };
+    screen.publish_calendar_result(name, &event_id, &result);
 }
 
 /// One Matter command, then its answer to the screen (a call that did not get through too).

@@ -154,7 +154,8 @@ and Decline on an invitation (`can_respond`, the current answer marked), Delete 
 own event (`can_delete`, after a confirmation on the screen; for a recurring event it deletes this
 occurrence only). The screen sends a `CalendarCommand` through the dashboard bundle
 (`ICommandSink.onCalendarCommand`), which calls `CalendarService.Respond` or `Delete` on this
-bundle (SDV RPC, channel `calendar`).
+bundle (SDV RPC, channel `calendar`) and hands the answer back
+(`IScreenLink.publishCalendarResult`).
 
 A change passes these checks, in this order (`client/src/change.rs`):
 

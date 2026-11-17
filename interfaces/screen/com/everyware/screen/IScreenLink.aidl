@@ -72,4 +72,12 @@ interface IScreenLink {
      * account is linked it carries the setup page's URL for the QR code.
      */
     void publishAgenda(in byte[] agenda);
+
+    /**
+     * The calendar bundle's answer to a calendar command of the screen (ICommandSink.onCalendarCommand):
+     * which command ("respond", "delete", "disconnect"), the event it was for (empty for a
+     * disconnect), and a com.everyware.CalendarResult (catalog/calendar_service.proto). The agenda
+     * after the change comes before it (publishAgenda). A new method goes last.
+     */
+    void publishCalendarResult(@utf8InCpp String command, @utf8InCpp String eventId, in byte[] result);
 }

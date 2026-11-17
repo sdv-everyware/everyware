@@ -30,4 +30,5 @@ interface IScreenLink {
   void subscribeCommands(in com.everyware.screen.ICommandSink sink);
   void publishSettings(in byte[] settings);
   void publishAgenda(in byte[] agenda);
+  void publishCalendarResult(@utf8InCpp String command, @utf8InCpp String eventId, in byte[] result);
 }

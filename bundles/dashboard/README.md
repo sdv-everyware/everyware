@@ -8,8 +8,8 @@ takes a call only from this bundle. What goes the other way, the screen's Wi-Fi,
 calendar commands and its settings changes, comes into the sink the bundle hands the panel
 (`ICommandSink`); the bundle calls the Wi-Fi bundle's RPC `WifiService`, the Matter bundle's
 `MatterService` or the calendar bundle's `CalendarService` for each, and the answer goes back to
-the screen (`publishWifiResult`, `publishMatterResult`; a calendar change shows in the agenda the
-calendar bundle publishes after it, and its answer is in the log). `proto/dashboard.proto` is the gRPC link that hub, tv and pairs still
+the screen (`publishWifiResult`, `publishMatterResult`, `publishCalendarResult`; a calendar
+change also shows in the agenda the calendar bundle publishes before it answers). `proto/dashboard.proto` is the gRPC link that hub, tv and pairs still
 build against; the panel does not serve it.
 
 ```
@@ -71,7 +71,8 @@ screen never waits for a connect that never started (decisions.md, 2026-11-06).
   `com.everyware.WifiService` on the channel `wifi`, of `com.everyware.MatterService` on the
   channel `matter` and of `com.everyware.CalendarService` on the channel `calendar`.
 - A calendar change or the unlink of the account (`onCalendarCommand`, a `CalendarCommand`) is a
-  call of `CalendarService` in a task of its own (`call_calendar`, deadline 90 s); the client is made once the calendar bundle's
+  call of `CalendarService` in a task of its own (`call_calendar`, deadline 90 s), its answer to
+  the screen with `publishCalendarResult` (one that does not get through is answered `AGAIN`); the client is made once the calendar bundle's
   server is registered (`find_calendar`). The calendar bundle checks that the caller is this
   bundle and that the agenda it published allows the change (`bundles/calendar/README.md`,
   "Changes from the screen").
