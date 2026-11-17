@@ -31,7 +31,7 @@ use everyware_bundle_store::Store;
 use everyware_calendar_client::change::{self, Change, Failure, Reply};
 use everyware_calendar_client::events::DAYS;
 use everyware_calendar_client::google::{Google, Live};
-use everyware_calendar_client::link::{agenda_of, failed, not_read, Link, Outcome, Pace, Session, CLIENT_FILE, POLL_INTERVAL, SETUP_URL_FILE};
+use everyware_calendar_client::link::{agenda_of, ended_replaced, failed, not_read, Link, Outcome, Pace, Session, CLIENT_FILE, POLL_INTERVAL, SETUP_URL_FILE};
 use everyware_calendar_client::net;
 use everyware_calendar_client::oauth::{ClientConfig, Grant, Tokens};
 use everyware_calendar_client::server::{Limits, SetupEnd, SetupPage};
@@ -45,6 +45,7 @@ use sdv::status::{SdvResult, SdvStatus, SdvStatusCode};
 use sdv_mw_rs_com_everyware_calendar_service_bundle::{CalendarServiceBundle as Bundle, PublisherDescriptors};
 use std::future::Future;
 use std::net::Ipv4Addr;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use tokio::net::TcpListener;
@@ -67,8 +68,8 @@ const TAKE_WAIT: Duration = Duration::from_secs(70);
 /// A change's calls to Google (a renewal of the token, the read of the event, the change, once
 /// more after a 401 or a 412), at most.
 const CHANGE_WORK: Duration = Duration::from_secs(40);
-/// The read of the agenda after a change, at most: when it is late the answer goes without it,
-/// and the next read brings the agenda.
+/// The read of the agenda after a change holds the answer back this long at most: then the
+/// answer goes, and the read goes on.
 const READ_AFTER_CHANGE: Duration = Duration::from_secs(20);
 /// Once the loop took a change its answer comes within this (CHANGE_WORK, READ_AFTER_CHANGE and
 /// some slack). With TAKE_WAIT that is 135 s; the dashboard bundle waits 150 s.
@@ -229,25 +230,31 @@ fn refuse(asked: Asked) {
 }
 
 /// The grants of clients the owner replaced: useless with the new client, still good at Google.
-/// They are set aside (a new link cannot overwrite them), then ended at Google and forgotten;
-/// one Google could not be told about stays aside and is tried again at the loop's next pass
-/// and the next start.
-async fn end_replaced(link: &Link, client: &ClientConfig) {
+/// They are set aside at once (a new link cannot overwrite them), then ended at Google in a task
+/// of its own, so the loop (the saved agenda, the setup page, the changes) never waits for
+/// Google; one Google could not be told about stays aside and is tried again at the loop's next
+/// pass and the next start. One such task at a time (`ending`).
+fn end_replaced(link: &Link, client: &ClientConfig, ending: &Arc<AtomicBool>) {
     let replaced = link.set_aside_replaced(client);
-    if replaced.is_empty() {
+    if replaced.is_empty() || ending.swap(true, Ordering::SeqCst) {
         return;
     }
-    let mut kept = Vec::new();
-    for old in replaced {
-        match Live.revoke(&old.refresh_token).await {
-            Ok(()) => info!("the grant of a replaced OAuth client is ended at Google"),
-            Err(err) => {
-                warn!("the grant of a replaced OAuth client could not be ended at Google ({err}); kept aside, tried again later");
-                kept.push(old);
+    let (store, ending) = (link.shared_store(), ending.clone());
+    tokio::spawn(async move {
+        let mut ended = Vec::new();
+        for old in &replaced {
+            match Live.revoke(&old.refresh_token).await {
+                Ok(()) => {
+                    info!("the grant of a replaced OAuth client is ended at Google");
+                    ended.push(old.refresh_token.clone());
+                }
+                Err(err) => warn!("the grant of a replaced OAuth client could not be ended at Google ({err}); kept aside, tried again later"),
             }
         }
-    }
-    link.keep_replaced(&kept);
+        // only the ones Google ended leave: what was set aside meanwhile stays
+        ended_replaced(&store, &ended);
+        ending.store(false, Ordering::SeqCst);
+    });
 }
 
 /// The topic, and the agenda published last.
@@ -284,6 +291,7 @@ async fn handle_agenda_publisher(mut out: Output, mut link: Link, mut changes: m
     // a setup URL a stopped bundle left holds a token of no page any more
     link.setup_url("");
     let mut no_client = String::new();
+    let ending = Arc::new(AtomicBool::new(false));
     loop {
         let client = match link.client() {
             Ok(client) => client,
@@ -299,7 +307,7 @@ async fn handle_agenda_publisher(mut out: Output, mut link: Link, mut changes: m
         };
         no_client.clear();
         info!("OAuth client {}", client.client_id);
-        end_replaced(&link, &client).await;
+        end_replaced(&link, &client, &ending);
         let session = match link.grant(&client) {
             Some(grant) => {
                 match kept.take() {
@@ -432,9 +440,18 @@ async fn read_agenda(mut session: Session, link: &mut Link, out: &mut Output, ch
     info!("reading the calendar every {} s", POLL_INTERVAL.as_secs());
     loop {
         let read = session.read(&Live, link.store(), Instant::now(), unix_now());
-        // after a change the read is bounded: its answer must not wait for a slow network
+        tokio::pin!(read);
+        // after a change the read holds the answer back READ_AFTER_CHANGE at most: then the
+        // answer goes, and the read goes on (its agenda follows the answer)
         let outcome = if answer.is_some() {
-            timeout(READ_AFTER_CHANGE, read).await.unwrap_or_else(|_| Outcome::Again("the read after a change took too long".into()))
+            tokio::select! {
+                outcome = &mut read => outcome,
+                () = sleep(READ_AFTER_CHANGE) => {
+                    info!("the read after a change is slow: the answer goes first");
+                    send(answer.take());
+                    read.await
+                }
+            }
         } else {
             read.await
         };

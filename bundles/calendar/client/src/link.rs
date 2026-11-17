@@ -133,6 +133,41 @@ pub fn agenda_of(link: CalendarLink) -> Agenda {
     agenda
 }
 
+/// The grants set aside in `store` (`Link::set_aside_replaced`).
+fn replaced(store: &Store) -> Vec<Grant> {
+    let Some(bytes) = store.read(REPLACED_FILE, MAX_GRANT_FILE * MAX_REPLACED) else { return Vec::new() };
+    let list: Vec<serde_json::Value> = serde_json::from_slice(&bytes).unwrap_or_default();
+    list.iter().filter_map(|v| Grant::parse(v.to_string().as_bytes())).collect()
+}
+
+/// The grants still to be ended at Google into `store`, each once, the newest `MAX_REPLACED`;
+/// none: the file removed.
+fn keep_replaced(store: &Store, grants: &[Grant]) {
+    let mut once: Vec<&Grant> = Vec::new();
+    for grant in grants {
+        if !once.iter().any(|g| g.refresh_token == grant.refresh_token) {
+            once.push(grant);
+        }
+    }
+    let once = &once[once.len().saturating_sub(MAX_REPLACED)..];
+    let written = if once.is_empty() {
+        store.remove(REPLACED_FILE)
+    } else {
+        let json = format!("[{}]", once.iter().map(|g| g.to_json()).collect::<Vec<_>>().join(","));
+        store.save_private(REPLACED_FILE, json.as_bytes())
+    };
+    if let Err(err) = written {
+        log::error!("{REPLACED_FILE}: {err}");
+    }
+}
+
+/// The grants Google ended (by refresh token) out of the ones set aside in `store`: what was set
+/// aside meanwhile stays (the revocation runs beside the bundle's loop).
+pub fn ended_replaced(store: &Store, ended: &[String]) {
+    let left: Vec<Grant> = replaced(store).into_iter().filter(|g| !ended.contains(&g.refresh_token)).collect();
+    keep_replaced(store, &left);
+}
+
 /// Connected with `grant`, not read yet: `updated` 0, no events, the access granted.
 pub fn not_read(grant: &Grant) -> Agenda {
     let mut agenda = agenda_of(CalendarLink::CALENDAR_CONNECTED);
@@ -336,6 +371,11 @@ impl Link {
         &self.store
     }
 
+    /// The bundle's directory, for a task of its own (the revocation of replaced grants).
+    pub fn shared_store(&self) -> Arc<Store> {
+        self.store.clone()
+    }
+
     /// What the last start left: whether the link had expired (however long ago: no account was
     /// linked since), and its agenda when it was connected and the agenda is a day old at most.
     pub fn last(&self) -> (bool, Option<Agenda>) {
@@ -419,11 +459,14 @@ impl Link {
     /// another client than `client` is moved aside first (it is useless with the new client and
     /// still good at Google), then every grant set aside, now or before, is returned.
     pub fn set_aside_replaced(&self, client: &ClientConfig) -> Vec<Grant> {
-        let mut replaced = self.replaced();
+        let mut replaced = replaced(&self.store);
         let kept = self.store.read(GRANT_FILE, MAX_GRANT_FILE).and_then(|bytes| Grant::parse(&bytes));
         if let Some(old) = kept.filter(|grant| grant.client_id != client.client_id) {
             log::warn!("the kept grant is of another OAuth client: set aside to be ended at Google");
-            replaced.push(old);
+            // once: a stop between the two writes below left it in both files
+            if !replaced.iter().any(|g| g.refresh_token == old.refresh_token) {
+                replaced.push(old);
+            }
             // aside first, then out of grant.json: a stop in between leaves it in both, not lost
             self.keep_replaced(&replaced);
             self.forget_grant();
@@ -433,24 +476,9 @@ impl Link {
 
     /// The grants still to be ended at Google; none: the file removed.
     pub fn keep_replaced(&self, grants: &[Grant]) {
-        let grants = &grants[grants.len().saturating_sub(MAX_REPLACED)..];
-        let written = if grants.is_empty() {
-            self.store.remove(REPLACED_FILE)
-        } else {
-            let json = format!("[{}]", grants.iter().map(Grant::to_json).collect::<Vec<_>>().join(","));
-            self.store.save_private(REPLACED_FILE, json.as_bytes())
-        };
-        if let Err(err) = written {
-            log::error!("{REPLACED_FILE}: {err}");
-        }
+        keep_replaced(&self.store, grants);
     }
 
-    /// The grants set aside.
-    fn replaced(&self) -> Vec<Grant> {
-        let Some(bytes) = self.store.read(REPLACED_FILE, MAX_GRANT_FILE * MAX_REPLACED) else { return Vec::new() };
-        let list: Vec<serde_json::Value> = serde_json::from_slice(&bytes).unwrap_or_default();
-        list.iter().filter_map(|v| Grant::parse(v.to_string().as_bytes())).collect()
-    }
 
     /// `grant.json` removed.
     pub fn forget_grant(&self) {
@@ -1030,10 +1058,43 @@ mod tests {
         assert!(!d.join(REPLACED_FILE).exists());
         assert_eq!(link.set_aside_replaced(&client), vec![]);
         // bounded: the oldest go first
-        let many: Vec<Grant> = (0..MAX_REPLACED + 2).map(|i| Grant { client_id: format!("id-{i}"), ..grant() }).collect();
+        let many: Vec<Grant> = (0..MAX_REPLACED + 2).map(|i| Grant { client_id: format!("id-{i}"), refresh_token: format!("1//{i}"), ..grant() }).collect();
         link.keep_replaced(&many);
         let aside = link.set_aside_replaced(&client);
         assert_eq!((aside.len(), aside[0].client_id.as_str()), (MAX_REPLACED, "id-2"));
+    }
+
+    #[test]
+    fn a_grant_set_aside_twice_is_kept_once() {
+        let d = dir("aside-twice");
+        let link = Link::new(Arc::new(Store::at(&d)));
+        let client = ClientConfig::parse(CLIENT).unwrap();
+        let old = Grant { client_id: "id-0".into(), refresh_token: "1//old".into(), ..grant() };
+        // a stop after the old grant went aside and before it left grant.json: in both files
+        link.keep_replaced(&[old.clone()]);
+        link.linked(&old);
+        assert_eq!(link.set_aside_replaced(&client), vec![old.clone()]);
+        assert!(!d.join(GRANT_FILE).exists());
+        link.keep_replaced(&[old.clone(), old.clone()]);
+        assert_eq!(link.set_aside_replaced(&client), vec![old.clone()]);
+    }
+
+    #[test]
+    fn the_grants_google_ended_leave_and_the_others_stay() {
+        let d = dir("ended");
+        let store = Arc::new(Store::at(&d));
+        let link = Link::new(store.clone());
+        let client = ClientConfig::parse(CLIENT).unwrap();
+        let a = Grant { client_id: "id-a".into(), refresh_token: "1//a".into(), ..grant() };
+        let b = Grant { client_id: "id-b".into(), refresh_token: "1//b".into(), ..grant() };
+        link.keep_replaced(&[a.clone(), b.clone()]);
+        // a revocation ran beside the loop; meanwhile another grant went aside
+        let c = Grant { client_id: "id-c".into(), refresh_token: "1//c".into(), ..grant() };
+        link.keep_replaced(&[a.clone(), b.clone(), c.clone()]);
+        ended_replaced(&store, &["1//a".to_string()]);
+        assert_eq!(link.set_aside_replaced(&client), vec![b, c]);
+        ended_replaced(&store, &["1//b".to_string(), "1//c".to_string()]);
+        assert!(!d.join(REPLACED_FILE).exists());
     }
 
     #[test]

@@ -92,7 +92,7 @@ page asks for the choice once more.
 | the account's answer (`response`) | its own attendee's `responseStatus` when it is a guest and not the organizer (`organizer.self`); `RSVP_NONE` for its own events and for events it is not a guest of |
 | `can_respond`, `can_delete` | with `Agenda.can_change` only: an answer when the account is a guest and not the organizer, a deletion when it is the organizer; never for a private or confidential event, for one that is not an ordinary event (`eventType` other than `default`: a birthday, an event from Gmail, out of office, focus time, a working location) or for an id that is not Google's whole id (longer than the catalog's 128 bytes) |
 | the description | plain text, at most 2000 bytes: Google keeps one written in Calendar's editor as HTML, so the tags are taken out (a line break for `<br>`, a line of their own for paragraphs, `div`s and list items, "• " before an item), the entities decoded, control and direction characters taken out except the line break, no more than one blank line in a row, cut at a character with an ellipsis |
-| the meeting link | the Google Meet link (`hangoutLink`), else the first video entry point of the conference data (Zoom, Teams); https only, at most 256 bytes, else empty |
+| the meeting link | the Google Meet link (`hangoutLink`), else the first video entry point of the conference data (Zoom, Teams); https only, at most 256 bytes, only the characters of RFC 3986 (no backslash, which a browser takes for a `/`) and no user part, so that it reads as the host it opens; else empty |
 | a private or confidential event | the title "Busy", no place, no description, no meeting link |
 | a recurring event | each occurrence of the seven days is an event (`singleEvents=true`) |
 | a cancelled event, an invitation the account declined | not in the agenda (`fields` asks for the account's own answer only: `attendees(self,responseStatus)`, `maxAttendees=1`) |
@@ -195,8 +195,8 @@ A 401 renews the access token once. A change waits in a queue of four at most. T
 within 70 s (it may be in a read of the agenda), or it is not made at all and the answer is
 `AGAIN` ("the calendar is busy; nothing was changed"): a change the screen was told failed is
 never made later. From the moment the loop takes it the answer comes within 65 s: the change
-within 40 s, the read of the agenda after it within 20 s (a later read goes on without holding the
-answer back: the next one brings the agenda). The dashboard bundle waits 150 s, the panel 160 s.
+within 40 s, the read of the agenda after it holds the answer back 20 s at most (a slower read is
+not cancelled: the answer goes, the read goes on, and its agenda follows the answer). The dashboard bundle waits 150 s, the panel 160 s.
 A change whose 40 s run out is answered `AGAIN` although Google may have made it; the next read
 shows what Google has.
 
@@ -221,7 +221,8 @@ third-party access with nobody holding it: on the setup page an exchange whose c
 the calendar, one without a refresh token, and the second of two sign-ins at the same time; and
 the grants of an OAuth client the owner replaced (useless with the new client). Those are moved
 out of `grant.json` into `grants-replaced.json` (0600, eight at most) before anything else, so a
-new link cannot overwrite one before Google ended it; each is ended at Google at every pass of
+new link cannot overwrite one before Google ended it; each is ended at Google, in a task of its
+own so that the saved agenda, the setup page and the changes never wait for Google, at every pass of
 the bundle's loop and at every start until Google was told, then forgotten.
 
 ## Development without the relay page

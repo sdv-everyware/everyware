@@ -257,12 +257,22 @@ fn when(v: &Value) -> Option<(i64, bool)> {
 /// The event's video meeting: its Google Meet link, else the first video entry point of its
 /// conference data; https only, at most `MAX_MEETING_URL` bytes, else empty.
 fn meeting_url(item: &Value) -> String {
-    let good = |uri: &&str| uri.starts_with("https://") && uri.len() <= MAX_MEETING_URL && !uri.chars().any(|c| c.is_whitespace() || c.is_control());
+    let good = |uri: &&str| uri.len() <= MAX_MEETING_URL && plain_https(uri);
     let hangout = item["hangoutLink"].as_str().filter(good);
     let video = || {
         item["conferenceData"]["entryPoints"].as_array()?.iter().find(|e| e["entryPointType"] == "video")?["uri"].as_str().filter(good)
     };
     hangout.or_else(video).unwrap_or("").to_string()
+}
+
+/// Whether `uri` is an https link that reads as it opens: only the characters of RFC 3986 (no
+/// backslash, which a browser takes for a `/`, no space, no control character) and no user
+/// part (a meeting link has none, and `user@host` shows another host than it opens).
+pub fn plain_https(uri: &str) -> bool {
+    let Some(rest) = uri.strip_prefix("https://") else { return false };
+    let allowed = |c: char| c.is_ascii_alphanumeric() || "-._~:/?#[]@!$&'()*+,;=%".contains(c);
+    let authority = rest.split(['/', '?', '#']).next().unwrap_or("");
+    !authority.is_empty() && !authority.contains('@') && uri.chars().all(allowed)
 }
 
 /// A description as plain text: Google keeps a description written in Calendar's editor as HTML
@@ -607,6 +617,9 @@ mod tests {
              "start": {"dateTime": "2026-11-16T11:00:00Z"}},
             {"id": "long", "hangoutLink": "https://meet.google.com/{long}", "start": {"dateTime": "2026-11-16T12:00:00Z"}},
             {"id": "spaced", "hangoutLink": "https://meet.google.com/a b", "start": {"dateTime": "2026-11-16T12:30:00Z"}},
+            {"id": "backslash", "conferenceData": {"entryPoints": [{"entryPointType": "video", "uri": "https://evil.example\\@meet.google.com/x"}]},
+             "start": {"dateTime": "2026-11-16T12:40:00Z"}},
+            {"id": "user", "hangoutLink": "https://meet.google.com@evil.example/x", "start": {"dateTime": "2026-11-16T12:50:00Z"}},
             {"id": "secret", "visibility": "private", "description": "The interview at Rival Inc", "hangoutLink": "https://meet.google.com/xyz",
              "start": {"dateTime": "2026-11-16T13:00:00Z"}},
             {"id": "conf", "visibility": "confidential", "description": "Doctor", "conferenceData": {"entryPoints": [{"entryPointType": "video", "uri": "https://zoom.example/j/9"}]},
@@ -622,6 +635,9 @@ mod tests {
         // too long or with a space: none rather than a broken one
         assert_eq!(e("long").meeting_url, "");
         assert_eq!(e("spaced").meeting_url, "");
+        // a link that would read as another host than it opens: none
+        assert_eq!(e("backslash").meeting_url, "");
+        assert_eq!(e("user").meeting_url, "");
         // private and confidential: neither
         for id in ["secret", "conf"] {
             assert_eq!((e(id).title.as_str(), e(id).description.as_str(), e(id).meeting_url.as_str()), (BUSY, "", ""), "{id}");
@@ -676,6 +692,30 @@ mod tests {
         let long = read.events.iter().find(|e| e.id.ends_with('…')).unwrap();
         assert!(!long.can_delete && !long.can_respond);
         assert_eq!(what("bad/../id"), (RSVP_NONE, false, false, false));
+    }
+
+    #[test]
+    fn a_meeting_link_reads_as_it_opens() {
+        for good in ["https://meet.google.com/abc-defg-hij", "https://zoom.us/j/123?pwd=a.b-c_d~e", "https://teams.microsoft.com/l/meetup-join/19%3ameeting#x", "https://example.org:8443/x"] {
+            assert!(plain_https(good), "{good}");
+        }
+        // a browser ends the host at a backslash: evil.example opens, meet.google.com would show
+        for bad in [
+            "https://evil.example\\@meet.google.com/x",
+            "https://evil.example\\meet.google.com",
+            "https://meet.google.com@evil.example/x",
+            "https://user:pw@meet.google.com/x",
+            "https://meet.google.com/a b",
+            "https://meet.google.com/\u{1b}x",
+            "https://meet.google.com/<x>",
+            "https://meet.google.com/\"x",
+            "https://",
+            "https:///x",
+            "http://meet.google.com/x",
+            "javascript:alert(1)",
+        ] {
+            assert!(!plain_https(bad), "{bad}");
+        }
     }
 
     #[test]
