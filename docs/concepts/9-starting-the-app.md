@@ -127,6 +127,40 @@ vendor APEX (`vendor: true`); its libraries are `vendor_harplatform_lib_file`.
 A product whose panel needs less (no audio, no camera) gets a domain of its own: the same file
 with fewer rules, and the label in `file_contexts`.
 
+## Other processes of the panel: the browser, the camera, the game
+
+Three processes show in zones of the panel: each a Wayland client of the panel's socket
+`har-display` in its runtime directory `/data/vendor/everyware/run` (0750 root:oem_2900, the
+socket root's alone), so each runs as root. init starts them when the panel runs
+(`on property:init.svc.smarthome=running`). The RB3 boots with `androidboot.init_rc`, so init reads
+only the root init and its imports: device-rb3's `init.sdv_media.rc` imports the directory
+`/vendor/etc/init/everyware`, where the camera's and the game's services are installed; the
+browser has a root init of its own (`init.sdv_media.browser.rc`). The domains are device-rb3's
+(`sepolicy/vendor`); the panel's side of each is in its `vendor_harplatform.te`.
+
+| Process | Init service | Starts | SELinux domain | May |
+|---|---|---|---|---|
+| the browser (`scripts/everyware-browser.sh`: Cog in a Debian root) | `everyware_browser` (`product/everyware_browser.rc`), oneshot: the script keeps its children | with `EVERYWARE_BROWSER=true` (everyware.mk) | `everyware_browser` (permissive while its rules are collected) | `/proc/net/unix`; the rest as the denials show |
+| the camera (camera-app: a USB webcam in the camera tile and the full view) | `everyware_camera` (camera-app's `product/everyware_camera.rc`), root, group camera, started again when it ends | always on the RB3 (camera-app's `product/camera.mk`) | `everyware_camera` | `/dev/video*` and sysfs to find the camera; the GPU's render node; its design in `/vendor/etc/camera-app`; the panel's socket; its control socket `har-camera` (`everyware_camera_socket`), which the panel connects to; `setsched` for its decode thread; no network |
+| the game (doom-app: DOOM in a dialog) | `everyware_game` (doom-app's `product/everyware_game.rc`), root, started again when it ends | with `EVERYWARE_GAME=true` (doom-app's `product/doom.mk`) | `everyware_game` | the panel's socket (its picture in wl_shm memory the panel maps); its keys' FIFO `har-game-keys` (`everyware_game_fifo`), which the panel writes; the WAD in `/vendor/etc/doom`; its data in `/data/vendor/everyware/doom` (`everyware_game_data_file`); no GPU, no network |
+
+The camera's and the game's binaries are on the vendor partition (`/vendor/bin`), where the
+board's `file_contexts` labels them; the game's WAD is in `/vendor/etc/doom`. Each ends or waits
+when the panel goes away: the camera ends and init starts it again (harry's zone client does not
+connect again), the game waits for the panel and reaches it again.
+
+```bash
+# WHAT: the panel's other processes, their state and their domains
+adb shell 'getprop | grep -E "init.svc.(everyware_|smarthome)"; ps -AZ | grep -E "camera_app|doom_app|everyware"'
+# WHAT: what SELinux refused them (the board is permissive: denials are logged, not enforced)
+adb shell 'dmesg | grep avc | grep -E "everyware_(camera|game)"'
+```
+
+A clean start logs two denials of the camera and nothing else: `getattr` on `/system/etc/aconfig`
+and on `/system/etc/perfetto`, the libraries' look at the platform's flag and tracing
+configuration. Their types are private to the platform's policy, so the board's vendor policy
+can neither allow nor silence them; the camera does not need either directory.
+
 ## Updating and developing
 
 A product's update goes through the SDV Update Manager, with a rollback when the new version
