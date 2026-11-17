@@ -101,7 +101,7 @@ page asks for the choice once more.
 | `grant.json` | the client's id, the refresh token and the granted scopes, mode 0600 |
 | `grants-replaced.json` | the grants of OAuth clients the owner replaced, until Google ended them, mode 0600 |
 | `agenda.pb` | the last agenda, mode 0600 (titles, places, the account's address), published again at the next start |
-| `setup-url` | while the setup page is open: its URL with the one-time token, mode 0600, for the development flow |
+| `setup-url` | while the setup page is open: its URL with the one-time token, mode 0600, for the development flow; `scripts/calendar-setup-url.sh` prints it as a link for this computer |
 
 The colour of the calendar itself is not in the agenda: it needs the scope
 `calendar.calendarlist.readonly`, which the panel does not ask for. An event without a colour
