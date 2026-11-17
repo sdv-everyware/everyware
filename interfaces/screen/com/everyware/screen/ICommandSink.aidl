@@ -27,8 +27,8 @@ interface ICommandSink {
      * A change of the linked account's calendar: a com.everyware.CalendarCommand
      * (catalog/calendar_service.proto), an answer to an invitation or the deletion of one of the
      * account's events, for an event of the last agenda that allows it (AgendaEvent.can_respond,
-     * can_delete). A new method goes last, so a panel built before it keeps the numbers of the
-     * others.
+     * can_delete), or the unlink of the account. A new method goes last, so a panel built before
+     * it keeps the numbers of the others.
      */
     oneway void onCalendarCommand(in byte[] command);
 }

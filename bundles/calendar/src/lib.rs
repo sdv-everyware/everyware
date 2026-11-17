@@ -16,9 +16,10 @@
 //! page on the local network), keeps the account's refresh token in its own directory, reads the
 //! next seven days of the account's primary calendar every minute and publishes them on the
 //! topic `agenda` (catalog/calendar.proto, catalog/everyware.vsidl), with the state of the link.
-//! The screen gets it through the dashboard bundle. With write access granted it offers the
-//! CalendarService (catalog/calendar_service.proto) to the dashboard bundle: an answer to an
-//! invitation, the deletion of the account's own event. README.md has the flow and the security.
+//! The screen gets it through the dashboard bundle, and asks it through the CalendarService
+//! (catalog/calendar_service.proto): with write access granted an answer to an invitation or the
+//! deletion of the account's own event, and the unlink of the account (also how the access
+//! changes). README.md has the flow and the security.
 //!
 //! The shape is the service bundle vsidlc generates (`vsidlc --services`): a `ServiceBundle`
 //! with `SdvComms`, a current-thread runtime, `sdv_main` with the bundle's publisher and its RPC
@@ -29,14 +30,14 @@
 use everyware_bundle_store::Store;
 use everyware_calendar_client::change::{self, Change, Failure};
 use everyware_calendar_client::events::DAYS;
-use everyware_calendar_client::google::Live;
+use everyware_calendar_client::google::{Google, Live};
 use everyware_calendar_client::link::{agenda_of, failed, not_read, Link, Outcome, Pace, Session, CLIENT_FILE, POLL_INTERVAL, SETUP_URL_FILE};
 use everyware_calendar_client::net;
 use everyware_calendar_client::oauth::{ClientConfig, Grant, Tokens};
 use everyware_calendar_client::server::{Limits, SetupEnd, SetupPage};
 use everyware_calendar_client::setup::PORT;
 use everyware_catalog::calendar::{Agenda, CalendarLink};
-use everyware_catalog::calendar_service::{CalendarDelete, CalendarFailure, CalendarRespond, CalendarResult};
+use everyware_catalog::calendar_service::{CalendarDelete, CalendarDisconnect, CalendarFailure, CalendarRespond, CalendarResult};
 use log::{debug, error, info, warn};
 use sdv::comms::id::ServiceFqin;
 use sdv::mw::{clientlib, Communicate, Publisher, SdvComms};
@@ -65,8 +66,13 @@ const CHANGE_WORK: Duration = Duration::from_secs(40);
 /// A change is answered within this, or "no answer in time"; the dashboard bundle waits longer.
 const CHANGE_ANSWER: Duration = Duration::from_secs(80);
 
-/// A change of the screen for the loop, and where its answer goes.
-type Asked = (Change, oneshot::Sender<CalendarResult>);
+/// What the screen asks of the loop, and where its answer goes.
+enum Asked {
+    /// A change of an event.
+    Change(Change, oneshot::Sender<CalendarResult>),
+    /// The unlink of the account.
+    Disconnect(oneshot::Sender<CalendarResult>),
+}
 
 sdv::lifecycle::register_service_bundle!(CalendarServiceBundle);
 
@@ -137,35 +143,46 @@ async fn sdv_main(comms: Arc<dyn Communicate>, store: Arc<Store>) -> sdv::status
     Ok(())
 }
 
-/// The CalendarService server: a change of the screen, checked, into the loop; the loop answers
-/// once it is made (or not) and the agenda after it is out.
+/// The CalendarService server: what the screen asks, checked, into the loop; the loop answers
+/// once it is done (or not) and the agenda after it is out.
 struct CalendarServiceRpc {
     changes: mpsc::Sender<Asked>,
 }
 
 impl CalendarServiceRpc {
-    async fn ask(&self, caller: &ServiceFqin, change: Result<Change, Failure>) -> SdvResult<CalendarResult> {
-        // the authz policy lets any bundle that declares itself a client call; only the screen's
-        // bridge asks
-        if !change::caller_allowed(caller.get_sdv_package_name(), caller.get_service_bundle_name()) {
-            warn!("a change from {caller}: not the dashboard bundle, refused");
-            return Err(SdvStatus::new(SdvStatusCode::PermissionDenied));
+    /// The authz policy lets any bundle that declares itself a client call; only the screen's
+    /// bridge asks.
+    fn check_caller(caller: &ServiceFqin) -> SdvResult<()> {
+        if change::caller_allowed(caller.get_sdv_package_name(), caller.get_service_bundle_name()) {
+            Ok(())
+        } else {
+            warn!("a request from {caller}: not the dashboard bundle, refused");
+            Err(SdvStatus::new(SdvStatusCode::PermissionDenied))
         }
-        let change = match change {
-            Ok(change) => change,
+    }
+
+    /// A change of an event, well formed, into the loop.
+    async fn change(&self, caller: &ServiceFqin, change: Result<Change, Failure>) -> SdvResult<CalendarResult> {
+        Self::check_caller(caller)?;
+        match change {
+            Ok(change) => Ok(self.pass(|reply| Asked::Change(change, reply)).await),
             Err(failure) => {
                 warn!("a change that is not one: {}", failure.why);
-                return Ok(change::result(&Err(failure)));
+                Ok(change::result(&Err(failure)))
             }
-        };
-        let (reply, answer) = oneshot::channel();
-        if self.changes.try_send((change, reply)).is_err() {
-            return Ok(change::result(&Err(Failure::again("the calendar is busy with other changes"))));
         }
-        Ok(match timeout(CHANGE_ANSWER, answer).await {
+    }
+
+    /// Into the loop, and its answer.
+    async fn pass(&self, asked: impl FnOnce(oneshot::Sender<CalendarResult>) -> Asked) -> CalendarResult {
+        let (reply, answer) = oneshot::channel();
+        if self.changes.try_send(asked(reply)).is_err() {
+            return change::result(&Err(Failure::again("the calendar is busy with other changes")));
+        }
+        match timeout(CHANGE_ANSWER, answer).await {
             Ok(Ok(result)) => result,
             _ => change::result(&Err(Failure::again("no answer in time"))),
-        })
+        }
     }
 }
 
@@ -173,29 +190,48 @@ impl CalendarServiceRpc {
 #[allow(non_snake_case)]
 impl com_everyware_calendar_service_rpc::Interface for CalendarServiceRpc {
     async fn Respond(&self, caller_id: ServiceFqin, request: &CalendarRespond) -> SdvResult<CalendarResult> {
-        self.ask(&caller_id, Change::respond(request)).await
+        self.change(&caller_id, Change::respond(request)).await
     }
 
     async fn Delete(&self, caller_id: ServiceFqin, request: &CalendarDelete) -> SdvResult<CalendarResult> {
-        self.ask(&caller_id, Change::delete(request)).await
+        self.change(&caller_id, Change::delete(request)).await
+    }
+
+    async fn Disconnect(&self, caller_id: ServiceFqin, _request: &CalendarDisconnect) -> SdvResult<CalendarResult> {
+        Self::check_caller(&caller_id)?;
+        Ok(self.pass(Asked::Disconnect).await)
     }
 }
 
-/// While no account is read: waits for `wait`, and a change asked meanwhile is answered at once
-/// that no account is linked.
+/// While no account is read: waits for `wait`, and what the screen asks meanwhile is answered at
+/// once that no account is linked.
 async fn refuse_while(changes: &mut mpsc::Receiver<Asked>, wait: impl Future<Output = ()>) {
     tokio::pin!(wait);
     loop {
         tokio::select! {
             () = &mut wait => return,
-            Some((_, reply)) = changes.recv() => refuse(reply),
+            Some(asked) = changes.recv() => refuse(asked),
         }
     }
 }
 
-/// A change while no account is linked.
-fn refuse(reply: oneshot::Sender<CalendarResult>) {
+/// A change or an unlink while no account is linked.
+fn refuse(asked: Asked) {
+    let (Asked::Change(_, reply) | Asked::Disconnect(reply)) = asked;
     let _ = reply.send(change::result(&Err(Failure::new(CalendarFailure::CALENDAR_FAILURE_NOT_LINKED, "no account is linked"))));
+}
+
+/// The grant of a client the owner replaced: useless with the new one, still good at Google, so
+/// it is ended there and forgotten. When Google cannot be told it stays, for the next start.
+async fn end_replaced(link: &Link, client: &ClientConfig) {
+    let Some(old) = link.grant_of_another_client(client) else { return };
+    match Live.revoke(&old.refresh_token).await {
+        Ok(()) => {
+            info!("the grant of the replaced OAuth client is ended at Google");
+            link.forget_grant();
+        }
+        Err(err) => warn!("the grant of the replaced OAuth client could not be ended at Google ({err}); again at the next start"),
+    }
 }
 
 /// The topic, and the agenda published last.
@@ -259,17 +295,20 @@ async fn handle_agenda_publisher(mut out: Output, mut link: Link, mut changes: m
                 }
                 Session::new(client, grant, None, Instant::now())
             }
-            None => match run_setup(&client, &link, &mut out, expired, &mut changes).await {
-                SetupEnd::Linked(grant, tokens) => {
-                    expired = false;
-                    linked(&link, &mut out, client, grant, tokens)
+            None => {
+                end_replaced(&link, &client).await;
+                match run_setup(&client, &link, &mut out, expired, &mut changes).await {
+                    SetupEnd::Linked(grant, tokens) => {
+                        expired = false;
+                        linked(&link, &mut out, client, grant, tokens)
+                    }
+                    SetupEnd::Refused(why) => {
+                        warn!("{why}: no client until {CLIENT_FILE} changes");
+                        out.publish(link.refused());
+                        continue;
+                    }
                 }
-                SetupEnd::Refused(why) => {
-                    warn!("{why}: no client until {CLIENT_FILE} changes");
-                    out.publish(link.refused());
-                    continue;
-                }
-            },
+            }
         };
         match read_agenda(session, &mut link, &mut out, &mut changes).await {
             Ended::Revoked(why) => {
@@ -281,6 +320,8 @@ async fn handle_agenda_publisher(mut out: Output, mut link: Link, mut changes: m
                 warn!("{why}: no client until {CLIENT_FILE} changes");
                 out.publish(link.refused());
             }
+            // the setup page again, with the choice of access
+            Ended::Disconnected => expired = false,
         }
     }
 }
@@ -321,7 +362,7 @@ async fn run_setup(client: &ClientConfig, files: &Link, out: &mut Output, expire
                 return end;
             }
             Some(()) = events.used.recv() => {}
-            Some((_, reply)) = changes.recv() => refuse(reply),
+            Some(asked) = changes.recv() => refuse(asked),
             _ = tick.tick() => {
                 let now = net::read_lan_address();
                 if now != address {
@@ -357,13 +398,16 @@ async fn run_setup(client: &ClientConfig, files: &Link, out: &mut Output, expire
 enum Ended {
     Revoked(String),
     Refused(String),
+    /// The screen unlinked the account; its grant is ended at Google and forgotten.
+    Disconnected,
 }
 
 /// The agenda of the linked account: read at once, then every `POLL_INTERVAL`; after a failed
 /// read the waits grow (`Pace`), and once the reads have failed for `FAILED_AFTER` the last
 /// agenda goes out again with `read_failed`. A change of the screen is made between two reads;
 /// when it reached Google the agenda is read at once, and the answer goes back once that agenda is
-/// out. Returns when the grant is not good any more or Google refuses the client.
+/// out. Returns when the grant is not good any more, Google refuses the client, or the screen
+/// unlinked the account.
 async fn read_agenda(mut session: Session, link: &mut Link, out: &mut Output, changes: &mut mpsc::Receiver<Asked>) -> Ended {
     let mut pace = Pace::default();
     let mut count = None;
@@ -403,14 +447,31 @@ async fn read_agenda(mut session: Session, link: &mut Link, out: &mut Output, ch
         loop {
             tokio::select! {
                 () = sleep_until(next) => break,
-                Some((change, reply)) = changes.recv() => {
-                    let (result, read_now) = make(&mut session, link, out.last.as_ref(), &change).await;
-                    if read_now {
-                        answer = Some((reply, result));
-                        break;
+                Some(asked) = changes.recv() => match asked {
+                    Asked::Change(change, reply) => {
+                        let (result, read_now) = make(&mut session, link, out.last.as_ref(), &change).await;
+                        if read_now {
+                            answer = Some((reply, result));
+                            break;
+                        }
+                        let _ = reply.send(result);
                     }
-                    let _ = reply.send(result);
-                }
+                    Asked::Disconnect(reply) => {
+                        let outcome = timeout(CHANGE_WORK, session.disconnect(&Live)).await.unwrap_or_else(|_| Err(Failure::again("Google did not answer in time")));
+                        let unlinked = outcome.is_ok();
+                        match &outcome {
+                            Ok(()) => {
+                                info!("the account is unlinked: its grant is ended at Google and forgotten");
+                                out.publish(link.disconnected());
+                            }
+                            Err(failure) => warn!("the account is not unlinked: {}", failure.why),
+                        }
+                        let _ = reply.send(change::result(&outcome));
+                        if unlinked {
+                            return Ended::Disconnected;
+                        }
+                    }
+                },
             }
         }
     }

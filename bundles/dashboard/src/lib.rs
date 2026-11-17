@@ -640,12 +640,14 @@ fn failed(error: &str) -> WifiResult {
     result
 }
 
-/// One calendar change: the call, its answer in the log. The calendar bundle publishes the agenda
-/// after the change before it answers, so the screen sees the change on the agenda.
+/// One calendar change or the unlink of the account: the call, its answer in the log. The
+/// calendar bundle publishes the agenda after it before it answers, so the screen sees it on the
+/// agenda.
 async fn call_calendar(calendar: Option<Arc<CalendarClient>>, command: CalendarCommand) {
     let (name, event_id) = match &command.command {
         Some(CalendarCmd::Respond(r)) => ("respond", r.event_id.clone()),
         Some(CalendarCmd::Delete(r)) => ("delete", r.event_id.clone()),
+        Some(CalendarCmd::Disconnect(_)) => ("disconnect", String::new()),
         Some(_) | None => return,
     };
     let Some(calendar) = calendar else {
@@ -655,6 +657,7 @@ async fn call_calendar(calendar: Option<Arc<CalendarClient>>, command: CalendarC
     let answer: SdvResult<CalendarResult> = match command.command {
         Some(CalendarCmd::Respond(r)) => calendar.Respond(&r).await,
         Some(CalendarCmd::Delete(r)) => calendar.Delete(&r).await,
+        Some(CalendarCmd::Disconnect(r)) => calendar.Disconnect(&r).await,
         Some(_) | None => return,
     };
     match answer {

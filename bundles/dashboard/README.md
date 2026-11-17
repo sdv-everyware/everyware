@@ -70,8 +70,8 @@ screen never waits for a connect that never started (decisions.md, 2026-11-06).
 - `apex/permissions.textproto`: subscriber of the seven topics, client of
   `com.everyware.WifiService` on the channel `wifi`, of `com.everyware.MatterService` on the
   channel `matter` and of `com.everyware.CalendarService` on the channel `calendar`.
-- A calendar change (`onCalendarCommand`, a `CalendarCommand`) is a call of `CalendarService` in a
-  task of its own (`call_calendar`, deadline 90 s); the client is made once the calendar bundle's
+- A calendar change or the unlink of the account (`onCalendarCommand`, a `CalendarCommand`) is a
+  call of `CalendarService` in a task of its own (`call_calendar`, deadline 90 s); the client is made once the calendar bundle's
   server is registered (`find_calendar`). The calendar bundle checks that the caller is this
   bundle and that the agenda it published allows the change (`bundles/calendar/README.md`,
   "Changes from the screen").

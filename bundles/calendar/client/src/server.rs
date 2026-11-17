@@ -167,10 +167,18 @@ impl<G: Google + 'static> SetupPage<G> {
                     info!("the setup page: an answer of no open flow");
                     return setup::page("400 Bad Request", &format!("This sign-in is old, was used or is not of this panel. {AGAIN}"));
                 };
+                // a grant the panel does not keep is ended at Google: nobody would hold it, and it
+                // would stay among the account's third-party access
                 match self.google.exchange(&self.client, &code, &verifier).await {
+                    Ok(tokens) if tokens.calendar().is_err() => {
+                        info!("the setup page: the calendar permission was not granted");
+                        self.end_grant(tokens.revocable()).await;
+                        setup::page("403 Forbidden", &format!("The calendar permission was not granted. {AGAIN}"))
+                    }
                     Ok(tokens) => {
                         let Some(refresh_token) = tokens.refresh_token.clone() else {
                             warn!("the setup page: Google sent no refresh token");
+                            self.end_grant(tokens.revocable()).await;
                             return setup::page("502 Bad Gateway", &format!("Google sent no lasting access. {AGAIN}"));
                         };
                         let scope = tokens.scope.clone().unwrap_or_default();
@@ -178,7 +186,12 @@ impl<G: Google + 'static> SetupPage<G> {
                         let grant = Grant { client_id: self.client.client_id.clone(), refresh_token, scope };
                         match self.end.try_send(SetupEnd::Linked(grant, tokens)) {
                             Ok(()) => setup::page("200 OK", "Done. You can close this page."),
-                            Err(_) => setup::page("409 Conflict", "The panel was linked by another sign-in just now."),
+                            Err(lost) => {
+                                if let SetupEnd::Linked(grant, _) = lost.into_inner() {
+                                    self.end_grant(&grant.refresh_token).await;
+                                }
+                                setup::page("409 Conflict", "The panel was linked by another sign-in just now.")
+                            }
                         }
                     }
                     Err(AuthError::Scope) => {
@@ -196,6 +209,17 @@ impl<G: Google + 'static> SetupPage<G> {
                     }
                 }
             }
+        }
+    }
+}
+
+impl<G: Google> SetupPage<G> {
+    /// Ends at Google a grant the panel does not keep; when Google cannot be told, the owner
+    /// removes it among the account's third-party access.
+    async fn end_grant(&self, token: &str) {
+        match self.google.revoke(token).await {
+            Ok(()) => info!("the setup page: the grant the panel does not keep is ended at Google"),
+            Err(err) => warn!("the setup page: a grant the panel does not keep could not be ended at Google ({err})"),
         }
     }
 }
@@ -231,15 +255,17 @@ mod tests {
     use tokio::io::duplex;
     use tokio::net::TcpListener;
 
-    /// Google whose token endpoint gives one scripted answer and writes down the verifiers.
+    /// Google whose token endpoint gives one scripted answer and writes down the verifiers and
+    /// the tokens whose grant was ended.
     struct Exchange {
         answer: Mutex<Option<Result<Tokens, AuthError>>>,
         verifiers: Mutex<Vec<String>>,
+        revoked: Mutex<Vec<String>>,
     }
 
     impl Exchange {
         fn new(answer: Result<Tokens, AuthError>) -> Exchange {
-            Exchange { answer: Mutex::new(Some(answer)), verifiers: Mutex::default() }
+            Exchange { answer: Mutex::new(Some(answer)), verifiers: Mutex::default(), revoked: Mutex::default() }
         }
     }
 
@@ -252,6 +278,11 @@ mod tests {
 
         async fn refresh(&self, _: &ClientConfig, _: &str) -> Result<Tokens, AuthError> {
             unreachable!("no refresh on the setup page")
+        }
+
+        async fn revoke(&self, token: &str) -> Result<(), AuthError> {
+            self.revoked.lock().unwrap().push(token.to_string());
+            Ok(())
         }
 
         async fn events(&self, _: &str, _: i64) -> Result<Read, ApiError> {
@@ -346,6 +377,48 @@ mod tests {
         }
         // the flow is over: the same answer again is refused
         assert!(ask(&page, &get(&callback)).await.starts_with("HTTP/1.1 400 "));
+    }
+
+    /// The setup page's state for a new flow: the QR code scanned, the first link's query.
+    async fn begin<G: Google + 'static>(page: &SetupPage<G>) -> HashMap<String, String> {
+        let answer = ask(page, &get(&format!("/setup?t={}", token_of(&page.url(Ipv4Addr::LOCALHOST))))).await;
+        query(&links(&answer)[0])
+    }
+
+    #[tokio::test]
+    async fn a_grant_the_panel_does_not_keep_is_ended_at_google() {
+        // the owner unticked the calendar: the grant Google made anyway is ended
+        {
+            let unticked = Tokens { scope: Some("openid email".into()), ..tokens() };
+            let (page, mut events, google) = page(Ok(unticked), Limits::default());
+            let state = begin(&page).await["state"].clone();
+            let answer = ask(&page, &get(&format!("/callback?code=c&state={state}"))).await;
+            assert!(answer.starts_with("HTTP/1.1 403 ") && answer.contains("not granted"), "{answer}");
+            assert_eq!(*google.revoked.lock().unwrap(), ["1//r"]);
+            assert!(events.end.try_recv().is_err(), "nothing linked");
+        }
+        // no refresh token: the access token ends the grant
+        {
+            let (page, _events, google) = page(Ok(Tokens { refresh_token: None, ..tokens() }), Limits::default());
+            let state = begin(&page).await["state"].clone();
+            assert!(ask(&page, &get(&format!("/callback?code=c&state={state}"))).await.starts_with("HTTP/1.1 502 "));
+            assert_eq!(*google.revoked.lock().unwrap(), ["ya29.a"]);
+        }
+        // linked by another sign-in just now: the second grant is ended
+        {
+            let (page, _events, google) = page(Ok(tokens()), Limits::default());
+            page.end.try_send(SetupEnd::Refused("the first end".into())).unwrap();
+            let state = begin(&page).await["state"].clone();
+            assert!(ask(&page, &get(&format!("/callback?code=c&state={state}"))).await.starts_with("HTTP/1.1 409 "));
+            assert_eq!(*google.revoked.lock().unwrap(), ["1//r"]);
+        }
+        // a grant that is kept is not ended
+        {
+            let (page, _events, google) = page(Ok(tokens()), Limits::default());
+            let state = begin(&page).await["state"].clone();
+            assert!(ask(&page, &get(&format!("/callback?code=c&state={state}"))).await.starts_with("HTTP/1.1 200 "));
+            assert!(google.revoked.lock().unwrap().is_empty());
+        }
     }
 
     #[tokio::test]

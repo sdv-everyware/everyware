@@ -180,6 +180,7 @@ impl Session {
     async fn token<G: Google + ?Sized>(&mut self, google: &G, store: &Store, now: Instant) -> Result<String, AuthError> {
         if self.access.as_ref().is_none_or(|(_, until)| now + REFRESH_MARGIN >= *until) {
             let tokens = google.refresh(&self.client, &self.grant.refresh_token).await?;
+            tokens.calendar()?;
             self.renewed(tokens, store, now);
         }
         Ok(self.access.as_ref().map(|(token, _)| token.clone()).unwrap_or_default())
@@ -236,6 +237,19 @@ impl Session {
                     }
                     return Err(failure);
                 }
+            }
+        }
+    }
+
+    /// The account unlinked (CalendarService.Disconnect): the grant ended at Google. Ok also when
+    /// Google says it was ended before; `AGAIN` when Google could not be told, and then the
+    /// account stays linked (the caller forgets the grant only after Ok, `Link::disconnected`).
+    pub async fn disconnect<G: Google + ?Sized>(&mut self, google: &G) -> Result<(), Failure> {
+        match google.revoke(&self.grant.refresh_token).await {
+            Err(AuthError::Other(why)) => Err(Failure::again(format!("Google could not be told: {why}"))),
+            _ => {
+                self.access = None;
+                Ok(())
             }
         }
     }
@@ -386,12 +400,33 @@ impl Link {
         }
     }
 
-    /// The grant is not good any more: forgotten, and the events with it; expired, kept (it
-    /// stays expired across restarts until an account is linked).
-    pub fn revoked(&mut self) -> Agenda {
+    /// The account unlinked from the screen (its grant ended at Google): the grant forgotten, and
+    /// the events with it; not connected, kept (a restart shows the setup page, not old events).
+    pub fn disconnected(&mut self) -> Agenda {
+        self.forget_grant();
+        let agenda = agenda_of(CalendarLink::CALENDAR_NOT_CONNECTED);
+        self.keep(&agenda);
+        self.kept = None;
+        agenda
+    }
+
+    /// A kept grant of another OAuth client than `client` (the owner put a new client on the
+    /// panel): useless with the new client, still good at Google until it is revoked.
+    pub fn grant_of_another_client(&self, client: &ClientConfig) -> Option<Grant> {
+        Grant::parse(&self.store.read(GRANT_FILE, MAX_GRANT_FILE)?).filter(|grant| grant.client_id != client.client_id)
+    }
+
+    /// `grant.json` removed.
+    pub fn forget_grant(&self) {
         if let Err(err) = self.store.remove(GRANT_FILE) {
             log::error!("the grant not removed: {err}");
         }
+    }
+
+    /// The grant is not good any more: forgotten, and the events with it; expired, kept (it
+    /// stays expired across restarts until an account is linked).
+    pub fn revoked(&mut self) -> Agenda {
+        self.forget_grant();
         let agenda = agenda_of(CalendarLink::CALENDAR_EXPIRED);
         self.keep(&agenda);
         self.kept = None;
@@ -440,6 +475,7 @@ mod tests {
         refresh: Mutex<VecDeque<Result<Tokens, AuthError>>>,
         events: Mutex<VecDeque<Result<Read, ApiError>>>,
         api: Mutex<VecDeque<Result<Reply, String>>>,
+        revoke: Mutex<VecDeque<Result<(), AuthError>>>,
         calls: Mutex<Vec<String>>,
         bodies: Mutex<Vec<String>>,
     }
@@ -469,6 +505,11 @@ mod tests {
         async fn refresh(&self, _: &ClientConfig, refresh_token: &str) -> Result<Tokens, AuthError> {
             self.calls.lock().unwrap().push(format!("refresh {refresh_token}"));
             self.refresh.lock().unwrap().pop_front().expect("a scripted refresh")
+        }
+
+        async fn revoke(&self, token: &str) -> Result<(), AuthError> {
+            self.calls.lock().unwrap().push(format!("revoke {token}"));
+            self.revoke.lock().unwrap().pop_front().expect("a scripted revocation")
         }
 
         async fn events(&self, access_token: &str, _: i64) -> Result<Read, ApiError> {
@@ -880,6 +921,67 @@ mod tests {
         let google = Script::new(vec![Ok(tokens("a2", None))], vec![Ok(read(1))]);
         session.read(&google, &store, Instant::now(), 0).await;
         assert!(session.can_change());
+    }
+
+    #[tokio::test]
+    async fn a_disconnect_ends_the_grant_at_google_then_forgets_it() {
+        let d = dir("disconnect");
+        let store = Arc::new(Store::at(&d));
+        let mut link = Link::new(store.clone());
+        let client = link.client().unwrap();
+        link.linked(&change_grant());
+        link.connected(read(3), true, 1000, Instant::now());
+        let google = Script { revoke: Mutex::new(vec![Ok(())].into()), ..Script::default() };
+        let mut session = fresh(change_grant());
+        assert_eq!(session.disconnect(&google).await, Ok(()));
+        assert_eq!(google.calls(), ["revoke 1//r"]);
+        let agenda = link.disconnected();
+        assert_eq!((link_of(&agenda), agenda.events.len(), agenda.can_change), (CalendarLink::CALENDAR_NOT_CONNECTED, 0, false));
+        assert!(!d.join(GRANT_FILE).exists() && link.grant(&client).is_none());
+        // a restart: not connected, not expired, no old events: the setup page with the choice
+        assert_eq!(Link::new(store).last(), (false, None));
+        assert_eq!(mode(d.join(LAST_AGENDA)), 0o600);
+    }
+
+    #[tokio::test]
+    async fn a_disconnect_google_cannot_hear_keeps_the_account() {
+        let d = dir("disconnectfails");
+        let store = Arc::new(Store::at(&d));
+        let mut link = Link::new(store.clone());
+        let client = link.client().unwrap();
+        link.linked(&grant());
+        let google = Script { revoke: Mutex::new(vec![Err(AuthError::Other("dns error".into()))].into()), ..Script::default() };
+        assert_eq!(failure(fresh(grant()).disconnect(&google).await), CalendarFailure::CALENDAR_FAILURE_AGAIN);
+        // the bundle forgets the grant only after Google ended it
+        assert_eq!(link.grant(&client), Some(grant()));
+        // ended before (Google: invalid_token, mapped to Ok by parse_revoke_response): unlinked
+        let google = Script { revoke: Mutex::new(vec![Ok(())].into()), ..Script::default() };
+        assert_eq!(fresh(grant()).disconnect(&google).await, Ok(()));
+    }
+
+    #[tokio::test]
+    async fn a_refresh_without_a_calendar_scope_ends_in_expired() {
+        let d = dir("noscope");
+        let store = Store::at(&d);
+        let google = Script::new(vec![Ok(Tokens { scope: Some("openid email".into()), ..tokens("a1", None) })], vec![]);
+        let outcome = Session::new(client(), grant(), None, Instant::now()).read(&google, &store, Instant::now(), 0).await;
+        assert!(matches!(outcome, Outcome::Revoked(_)), "{outcome:?}");
+        assert_eq!(google.calls(), ["refresh 1//r"]);
+    }
+
+    #[test]
+    fn a_grant_of_a_replaced_client_is_found_to_be_ended() {
+        let d = dir("replaced");
+        let mut link = Link::new(Arc::new(Store::at(&d)));
+        let client = link.client().unwrap();
+        assert_eq!(link.grant_of_another_client(&client), None);
+        link.linked(&grant());
+        assert_eq!(link.grant_of_another_client(&client), None, "the client's own grant");
+        let old = Grant { client_id: "id-0".into(), ..grant() };
+        link.linked(&old);
+        assert_eq!(link.grant_of_another_client(&client), Some(old));
+        link.forget_grant();
+        assert!(!d.join(GRANT_FILE).exists());
     }
 
     #[test]

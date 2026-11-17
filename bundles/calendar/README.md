@@ -30,6 +30,7 @@ flowchart LR
     G -- "3 302 with code and state" --> RP["relay page<br/>pages/oauth (https)"]
     RP -- "4 http://panel:8765/callback?code&state" --> SP
     SP -- "5 code + verifier" --> T["oauth2.googleapis.com/token"]
+    CB -- "8 unlink: the grant ended" --> R["oauth2.googleapis.com/revoke"]
     CB["CalendarServiceBundle"] -- "6 Events:list, every minute" --> API["www.googleapis.com<br/>Calendar API"]
     CB -. "topic agenda" .-> DB["DashboardServiceBundle"]
     DB -- "binder: publishAgenda" --> APP["the panel"]
@@ -78,8 +79,8 @@ consent screen lets the owner untick a scope; "read and change" asks for both so
 the change still links the calendar, for reading. A refresh that names other scopes replaces the
 kept ones, and a change Google refuses for a missing scope (403 `insufficientPermissions`) makes
 the grant read only. A grant kept before the choice existed has no scope and counts as read only.
-To change the access, link again: remove the panel's access at Google (the account's
-third-party access), the panel shows `CALENDAR_EXPIRED` and its setup page again.
+To change the access, the panel unlinks the account and links it again (next section): the setup
+page asks for the choice once more.
 
 ## What goes where
 
@@ -190,6 +191,28 @@ reads the calendar at once and publishes the new agenda, then answers (`Calendar
 A 401 renews the access token once. A change waits in a queue of four at most; the service
 answers within 80 s ("no answer in time" otherwise), the dashboard bundle waits 90 s.
 
+## Unlinking the account
+
+`CalendarService.Disconnect`, with read or write access alike: the screen's "Disconnect" and
+"Change access" (both after a confirmation on the screen). The same caller check as a change.
+
+1. The bundle ends the grant at Google: its refresh token posted to
+   `https://oauth2.googleapis.com/revoke` (the whole grant ends, every token of it). Google saying
+   `invalid_token` (ended before) counts as ended.
+2. Only then `grant.json` is removed and `agenda.pb` holds `CALENDAR_NOT_CONNECTED`, so a restart
+   shows the setup page, not the old week. The agenda `CALENDAR_NOT_CONNECTED` goes out, then the
+   answer (ok).
+3. The setup page opens with a new one-time token and asks for the access again.
+
+When Google cannot be told (no network, Google busy, no answer within 40 s) nothing changes: the
+account stays linked and the answer is `AGAIN`. Without an account the answer is `NOT_LINKED`.
+
+The panel also ends the grants it does not keep, so that none stays among the account's
+third-party access with nobody holding it: on the setup page an exchange whose consent left out
+the calendar, one without a refresh token, and the second of two sign-ins at the same time; and
+before the setup page, the grant of an OAuth client the owner replaced (it is useless with the new
+client; when Google cannot be told it stays for the next start).
+
 ## Development without the relay page
 
 Google allows `http://localhost` as the redirect of a web client, so the host's browser can do
@@ -259,6 +282,7 @@ its own script only, by hash, and no referrer leaves it. Where it is hosted is n
 | a read that fails | the last agenda stays; tried again after 2 s, then twice as long each time up to 5 minutes (the network comes some seconds after the bundle at boot; an outage of Google, 429 or 5xx, is asked some 20 times an hour, not every minute) |
 | Google refuses the client | `CALENDAR_NO_CLIENT` without events, until the client file changes |
 | a change of the screen | made between two reads; the agenda read at once after it and published before the answer |
+| an unlink from the screen | `CALENDAR_NOT_CONNECTED` once Google ended the grant, then the setup URL as at the first link |
 
 The access token (an hour) is renewed two minutes before it ends, and when the API refuses it.
 
@@ -315,8 +339,11 @@ state, so the relay page sends the phone back to the same one.
 - What it does not do either: a person who reads the Wi-Fi traffic while the owner opens the
   setup page sees the challenge and the state in the redirect, can finish that flow with his own
   account first, and the panel then links his calendar (no access to the owner's data, but his
-  agenda on the screen). The screen shows the linked calendar's title (the account's address);
-  there is no confirm or undo on the panel yet.
+  agenda on the screen). The undo is the panel's "Disconnect" (CalendarService.Disconnect, its
+  grant ended at Google); there is no confirm of the linked account before it shows.
+- Anyone at the panel can unlink the account (after the confirmation on the screen): the agenda
+  is gone until the owner links again, and the setup page that opens lets whoever sees the
+  screen link an account (as at the first link).
 - The setup page answers GET on `/setup` and `/callback` only, reads at most 4 kB of a request
   in 10 s, serves 8 connections at a time, and its pages run nothing (`default-src 'none'`),
   are not cached and send no referrer. It closes a connection by dropping it: `shutdown()` is not
@@ -355,6 +382,10 @@ state, so the relay page sends the phone back to the same one.
     carried, nothing when the answer is the one asked for), the URLs (`sendUpdates=all`,
     `If-Match`), Google's refusals mapped, a 401 renewing the token once, a 412 reading again
     once, the network, a revoked grant, a read-only answer making the grant read only (0600);
+  - the unlink: the grant ended at Google before it is forgotten, not connected after a restart,
+    the account kept when Google cannot be told; the grants the panel does not keep ended (a
+    consent without the calendar, no refresh token, a second sign-in, a replaced client's grant);
+    the revocation endpoint's answers (`invalid_token` counts as ended);
   - the access: the scopes asked for per choice, the scope Google granted (read, change, neither),
     the granted scope kept with the grant and taken from a refresh, an old grant read only, no
     event offering a change without it, what an event allows (organizer, guest, recurring,

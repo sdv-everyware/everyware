@@ -12,8 +12,9 @@
 
 //! Google's OAuth 2.0 for a web application, as the panel links an account: the client of the
 //! panel's owner (`ClientConfig`), the access the owner chooses (`Access`), the authorization
-//! request with PKCE (RFC 7636, S256) and a one-time state, the setup page's one-time token, and
-//! the token endpoint (the code exchanged, the refresh token used, the scope Google granted).
+//! request with PKCE (RFC 7636, S256) and a one-time state, the setup page's one-time token, the
+//! token endpoint (the code exchanged, the refresh token used, the scope Google granted) and the
+//! revocation endpoint (the grant ended at Google).
 //! <https://developers.google.com/identity/protocols/oauth2/web-server>
 
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
@@ -27,6 +28,8 @@ use std::time::{Duration, Instant};
 pub const AUTH_ENDPOINT: &str = "https://accounts.google.com/o/oauth2/v2/auth";
 /// Google's token endpoint.
 pub const TOKEN_ENDPOINT: &str = "https://oauth2.googleapis.com/token";
+/// Google's revocation endpoint: a refresh or access token posted there ends the whole grant.
+pub const REVOKE_ENDPOINT: &str = "https://oauth2.googleapis.com/revoke";
 /// The scope of reading the events.
 pub const READ_SCOPE: &str = "https://www.googleapis.com/auth/calendar.events.readonly";
 /// The scope of reading and changing the events: the answers to invitations, the deletions.
@@ -280,6 +283,24 @@ pub struct Tokens {
     pub scope: Option<String>,
 }
 
+impl Tokens {
+    /// Whether Google granted a calendar scope: `AuthError::Scope` when the answer names the
+    /// scopes and neither calendar scope is among them (the owner unticked them on the consent
+    /// screen). The tokens stay at hand, so that a grant the panel does not keep can be revoked.
+    pub fn calendar(&self) -> Result<(), AuthError> {
+        match &self.scope {
+            Some(scope) if Access::granted(scope).is_none() => Err(AuthError::Scope),
+            _ => Ok(()),
+        }
+    }
+
+    /// The token that ends the grant at Google: the refresh token, else the access token (Google
+    /// ends the grant of either).
+    pub fn revocable(&self) -> &str {
+        self.refresh_token.as_deref().unwrap_or(&self.access_token)
+    }
+}
+
 impl fmt::Debug for Tokens {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("Tokens")
@@ -318,6 +339,7 @@ impl fmt::Display for AuthError {
 }
 
 /// The token endpoint's answer: its tokens or its error (`{"error": ..., "error_description": ...}`).
+/// Whether a calendar scope was granted is `Tokens::calendar`.
 pub fn parse_token_response(status: u16, body: &str) -> Result<Tokens, AuthError> {
     let v: Value = serde_json::from_str(body).map_err(|_| AuthError::Other(format!("token endpoint: HTTP {status}, not JSON")))?;
     if let Some(error) = v.get("error").and_then(Value::as_str) {
@@ -334,9 +356,6 @@ pub fn parse_token_response(status: u16, body: &str) -> Result<Tokens, AuthError
     }
     let access_token = v.get("access_token").and_then(Value::as_str).filter(|t| !t.is_empty()).ok_or_else(|| AuthError::Other("no access_token".into()))?;
     let scope = v.get("scope").and_then(Value::as_str);
-    if scope.is_some_and(|scope| Access::granted(scope).is_none()) {
-        return Err(AuthError::Scope);
-    }
     Ok(Tokens {
         access_token: access_token.to_string(),
         expires_in: v.get("expires_in").and_then(Value::as_u64).unwrap_or(0),
@@ -365,6 +384,32 @@ pub fn refresh_form(client: &ClientConfig, refresh_token: &str) -> String {
         .append_pair("client_id", &client.client_id)
         .append_pair("client_secret", &client.client_secret)
         .finish()
+}
+
+/// The form that ends a grant: its refresh token, or one of its access tokens.
+pub fn revoke_form(token: &str) -> String {
+    form_urlencoded::Serializer::new(String::new()).append_pair("token", token).finish()
+}
+
+/// The revocation endpoint's answer: Ok when the grant is ended, also when Google says the token
+/// is not good any more (`invalid_token`: revoked or expired before); `AuthError::Other` when
+/// Google could not say (the network, Google busy, another error).
+pub fn parse_revoke_response(status: u16, body: &str) -> Result<(), AuthError> {
+    if (200..300).contains(&status) {
+        return Ok(());
+    }
+    let error = serde_json::from_str::<Value>(body).ok().and_then(|v| v.get("error").and_then(Value::as_str).map(str::to_string));
+    match error.as_deref() {
+        Some("invalid_token") => Ok(()),
+        Some(error) => Err(AuthError::Other(format!("revoke: HTTP {status} {error}"))),
+        None => Err(AuthError::Other(format!("revoke: HTTP {status}"))),
+    }
+}
+
+/// Ends the grant of `token` at Google.
+pub async fn revoke(token: &str) -> Result<(), AuthError> {
+    let reply = everyware_https::post_form(REVOKE_ENDPOINT, &revoke_form(token), MAX_TOKEN_REPLY).await.map_err(|e| AuthError::Other(e.to_string()))?;
+    parse_revoke_response(reply.status, &String::from_utf8_lossy(&reply.body))
 }
 
 /// The code of a flow exchanged for tokens.
@@ -569,7 +614,7 @@ mod tests {
         assert_eq!(change.scope.as_deref().and_then(Access::granted), Some(Access::Change));
         // a refresh: no new refresh token, no scope
         let refreshed = parse_token_response(200, r#"{"access_token":"ya29.b","expires_in":3599,"token_type":"Bearer"}"#).unwrap();
-        assert_eq!((refreshed.refresh_token, refreshed.scope), (None, None));
+        assert_eq!((refreshed.refresh_token.as_deref(), refreshed.scope.as_deref()), (None, None));
         assert_eq!(
             parse_token_response(400, r#"{"error":"invalid_grant","error_description":"Token has been expired or revoked."}"#),
             Err(AuthError::Grant("invalid_grant: Token has been expired or revoked.".into()))
@@ -579,7 +624,12 @@ mod tests {
         assert!(matches!(parse_token_response(400, r#"{"error":"unauthorized_client"}"#), Err(AuthError::Client(_))));
         assert!(matches!(parse_token_response(401, r#"{"error":"deleted_client","error_description":"The OAuth client was deleted."}"#), Err(AuthError::Client(_))));
         assert!(matches!(parse_token_response(400, r#"{"error":"invalid_request"}"#), Err(AuthError::Other(_))));
-        assert_eq!(parse_token_response(200, r#"{"access_token":"a","expires_in":1,"scope":"openid email"}"#), Err(AuthError::Scope));
+        // no calendar scope granted: the tokens stay at hand to be revoked
+        let none = parse_token_response(200, r#"{"access_token":"a","expires_in":1,"refresh_token":"1//x","scope":"openid email"}"#).unwrap();
+        assert_eq!((none.calendar(), none.revocable()), (Err(AuthError::Scope), "1//x"));
+        assert_eq!(Tokens { refresh_token: None, ..none }.revocable(), "a");
+        assert_eq!(ok.calendar(), Ok(()));
+        assert_eq!(refreshed.calendar(), Ok(()), "a refresh that names no scope keeps the grant's");
         assert!(matches!(parse_token_response(502, "<html>Bad Gateway</html>"), Err(AuthError::Other(_))));
         assert!(matches!(parse_token_response(500, "{}"), Err(AuthError::Other(_))));
         assert!(matches!(parse_token_response(200, r#"{"expires_in":1}"#), Err(AuthError::Other(_))));
@@ -596,6 +646,19 @@ mod tests {
         assert_eq!(form["client_secret"], "s3cret");
         let form: HashMap<String, String> = form_urlencoded::parse(refresh_form(&c, "1//r").as_bytes()).into_owned().collect();
         assert_eq!((form["grant_type"].as_str(), form["refresh_token"].as_str(), form["client_id"].as_str()), ("refresh_token", "1//r", "id-1.apps.googleusercontent.com"));
+    }
+
+    #[test]
+    fn a_grant_is_ended_at_google() {
+        assert_eq!(form_urlencoded::parse(revoke_form("1//r+/=").as_bytes()).into_owned().collect::<Vec<_>>(), [("token".to_string(), "1//r+/=".to_string())]);
+        assert_eq!(parse_revoke_response(200, ""), Ok(()));
+        assert_eq!(parse_revoke_response(200, "{}"), Ok(()));
+        // revoked or expired before: ended all the same
+        assert_eq!(parse_revoke_response(400, r#"{"error":"invalid_token","error_description":"Token expired or revoked"}"#), Ok(()));
+        // Google could not say: the grant may still be good
+        assert!(matches!(parse_revoke_response(400, r#"{"error":"invalid_request"}"#), Err(AuthError::Other(_))));
+        assert!(matches!(parse_revoke_response(503, "<html>"), Err(AuthError::Other(_))));
+        assert!(matches!(parse_revoke_response(429, ""), Err(AuthError::Other(_))));
     }
 
     #[test]
