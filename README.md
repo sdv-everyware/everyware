@@ -54,7 +54,7 @@ Wi-Fi, Matter), a UI library, the tools from Figma to the screen, and the docume
 ## What you get
 
 <p align="center">
-  <img src="docs/assets/building-blocks.svg" alt="Building blocks: design on top, the harry app and the service bundles, the SDV agents, the Android core and the hardware; the Java framework and Android apps are not on the device; designers, the internet, the devices in the house and other SDV devices around it" width="1000">
+  <img src="docs/assets/building-blocks.svg" alt="Building blocks: design on top, the harry app and the service bundles, the SDV agents, A/B updates with rollback, the Android core and the hardware; the Java framework and Android apps are not on the device; designers, the internet, the devices in the house and other SDV devices and an update server around it" width="1000">
 </p>
 
 Everything in the middle column up to the SDV agents is AOSP as Google ships it. There is no Java
