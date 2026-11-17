@@ -56,8 +56,12 @@ message Agenda {
     repeated AgendaEvent events = 4 [(.sdv.vsidl.v1.repeated_field_max_count) = 40];
     // Unix time of the last successful read of the calendar; 0 for none. With CALENDAR_CONNECTED, 0
     // means not read yet: the events are unknown, not none. A read that fails (no network, Google
-    // busy) keeps the last agenda as it was; updated tells how old it is.
+    // busy) keeps the last agenda as it was, with read_failed; updated tells how old it is.
     int64 updated = 5;
+    // With CALENDAR_CONNECTED: the last read failed (no network, Google busy) and the next one is
+    // on its way. With updated 0 the calendar could not be read since the link or the start:
+    // the events are unknown. False again after the next successful read.
+    bool read_failed = 6;
 }
 
 // One event, or one occurrence of a recurring event.

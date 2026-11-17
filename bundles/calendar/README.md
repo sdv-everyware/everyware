@@ -110,13 +110,14 @@ why), and so does a client Google refuses (next section).
 | a read | `agenda.pb` | `CALENDAR_CONNECTED` with the events and `updated` |
 | `invalid_grant` (the access revoked or ended), the calendar scope gone | `grant.json` removed | `CALENDAR_EXPIRED` without events, the setup page again; still expired after a restart |
 | `invalid_client`, `unauthorized_client`, `deleted_client` (the client deleted, its secret reset); the Calendar API turned off in the client's project (403 `accessNotConfigured`, `SERVICE_DISABLED`) | `grant.json` kept: a reset secret keeps the client's id, and the grant with it | `CALENDAR_NO_CLIENT` without events, not tried again until `oauth-client.json` changes (or the bundle restarts) |
-| anything else (no network, a quota, Google busy) | | the last agenda stays; `updated` tells its age; tried again after 2 s, then twice as long each time up to 5 minutes |
+| anything else (no network, a quota, Google busy) | | the last agenda stays, with `read_failed`; `updated` tells its age; tried again after 2 s, then twice as long each time up to 5 minutes |
 
 A refused client is not tried every minute: the owner fixes it in the Cloud console and
 runs `calendar-client.sh` again (a new secret is a new file; after turning the API on, the same
 file again restarts the bundle). The events of before are dropped, so the screen does not show an
 old week as current. While the reads only fail for a while, the screen can tell an old agenda
-by `updated`; `updated` 0 with `CALENDAR_CONNECTED` means not read yet, not an empty week.
+by `updated`; `updated` 0 with `CALENDAR_CONNECTED` means not read yet, not an empty week, and
+with `read_failed` that the reads fail.
 
 ## Development without the relay page
 

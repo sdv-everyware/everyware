@@ -22,7 +22,7 @@
 //! | a read | `agenda.pb` | `CALENDAR_CONNECTED` with the events |
 //! | `invalid_grant`, the scope gone | `grant.json` removed | `CALENDAR_EXPIRED`, no events, the setup page again |
 //! | the client refused, the Calendar API off | `grant.json` kept (a reset secret keeps the client's id) | `CALENDAR_NO_CLIENT`, no events, until `oauth-client.json` changes |
-//! | anything else | | the last agenda stays; its `updated` tells its age |
+//! | anything else | | the last agenda stays, with `read_failed` (`failed`); its `updated` tells its age |
 //!
 //! When the next read is (`Pace`): a minute after a read; after a failure 2 s, then twice as long
 //! each time up to 5 minutes, so an outage of Google or of the network is not asked every minute.
@@ -113,6 +113,15 @@ pub fn agenda_of(link: CalendarLink) -> Agenda {
 /// The link's state of an agenda.
 pub fn link_of(agenda: &Agenda) -> CalendarLink {
     agenda.link.enum_value_or_default()
+}
+
+/// A read failed: the agenda published last as it was (its events, its `updated`), with
+/// `read_failed`, so the screen tells a failed read from one not done yet. None when the last
+/// one is not connected. The next read clears it (`Link::connected` makes a new agenda).
+pub fn failed(last: Option<&Agenda>) -> Option<Agenda> {
+    let mut agenda = last.filter(|a| link_of(a) == CalendarLink::CALENDAR_CONNECTED)?.clone();
+    agenda.read_failed = true;
+    Some(agenda)
 }
 
 /// The reads of a linked account: the grant and the access token.
@@ -517,6 +526,26 @@ mod tests {
         // a read that works again: the minute again, and the next failure from 2 s
         assert_eq!(pace.after_read(), POLL_INTERVAL);
         assert_eq!(pace.after_failure(), RETRY_FIRST);
+    }
+
+    #[test]
+    fn a_failed_read_marks_the_last_agenda() {
+        let d = dir("failed");
+        let mut link = Link::new(Arc::new(Store::at(&d)));
+        // linked just now, not read yet: the screen learns that the read failed
+        let not_read = failed(Some(&agenda_of(CalendarLink::CALENDAR_CONNECTED))).unwrap();
+        assert_eq!((not_read.read_failed, not_read.updated, not_read.events.len()), (true, 0, 0));
+        // read once: a failure keeps the events and the time of that read
+        let first = link.connected(read(2), 1000, Instant::now());
+        let after = failed(Some(&first)).unwrap();
+        assert_eq!((after.read_failed, after.updated, after.events.len()), (true, 1000, 2));
+        assert_eq!(after, Agenda { read_failed: true, ..first });
+        // the next read clears it, and the kept agenda never has it
+        assert!(!link.connected(read(2), 1060, Instant::now()).read_failed);
+        assert!(!Agenda::parse_from_bytes(&fs::read(d.join(LAST_AGENDA)).unwrap()).unwrap().read_failed);
+        // nothing to mark when the last agenda is not connected, or there is none
+        assert_eq!(failed(Some(&agenda_of(CalendarLink::CALENDAR_EXPIRED))), None);
+        assert_eq!(failed(None), None);
     }
 
     #[test]

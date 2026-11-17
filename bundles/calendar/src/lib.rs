@@ -27,7 +27,7 @@
 use everyware_bundle_store::Store;
 use everyware_calendar_client::events::DAYS;
 use everyware_calendar_client::google::Live;
-use everyware_calendar_client::link::{agenda_of, Link, Outcome, Pace, Session, CLIENT_FILE, POLL_INTERVAL, SETUP_URL_FILE};
+use everyware_calendar_client::link::{agenda_of, failed, Link, Outcome, Pace, Session, CLIENT_FILE, POLL_INTERVAL, SETUP_URL_FILE};
 use everyware_calendar_client::net;
 use everyware_calendar_client::oauth::{ClientConfig, Grant, Tokens};
 use everyware_calendar_client::server::{Limits, SetupEnd, SetupPage};
@@ -275,8 +275,8 @@ enum Ended {
 }
 
 /// The agenda of the linked account: read at once, then every `POLL_INTERVAL`; after a failed
-/// read the waits grow (`Pace`). Returns when the grant is not good any more or Google refuses
-/// the client.
+/// read the waits grow (`Pace`) and the last agenda goes out again with `read_failed`. Returns
+/// when the grant is not good any more or Google refuses the client.
 async fn read_agenda(mut session: Session, link: &mut Link, out: &mut Output) -> Ended {
     let mut pace = Pace::default();
     let mut count = None;
@@ -297,6 +297,9 @@ async fn read_agenda(mut session: Session, link: &mut Link, out: &mut Output) ->
             Outcome::Again(why) => {
                 let wait = pace.after_failure();
                 warn!("reading the calendar failed: {why}; again in {} s", wait.as_secs());
+                if let Some(agenda) = failed(out.last.as_ref()) {
+                    out.publish(agenda);
+                }
                 wait
             }
         };
