@@ -1,8 +1,8 @@
 //! DashboardServiceBundle: the bridge between the house's topics and the screen. It
 //! subscribes to what the dashboard shows (`weather`, `news`, `news-thumbnails`,
-//! `wifi-networks`, `wifi-state`, `matter-devices`, catalog/everyware.vsidl) and pushes every
-//! update to the panel over binder (screen.rs, interfaces/screen IScreenLink); the panel itself
-//! is no SDV participant. The same shape as HAR's HarSdvServiceBundle pushing to harry-app: the
+//! `wifi-networks`, `wifi-state`, `matter-devices`, `agenda`, catalog/everyware.vsidl) and
+//! pushes every update to the panel over binder (screen.rs, interfaces/screen IScreenLink); the
+//! panel itself is no SDV participant. The same shape as HAR's HarSdvServiceBundle pushing to harry-app: the
 //! screen serves, the bundle calls it. The other way, the screen's commands come into this
 //! bundle's sink: a Wi-Fi command (it may carry the password typed on the screen) becomes a call
 //! of the Wi-Fi bundle's `WifiService`, a Matter command one of the Matter bundle's
@@ -47,6 +47,7 @@ const WIFI_CALL_TIMEOUT: Duration = Duration::from_secs(40);
 /// 150 s, a device command within its 20 s.
 const MATTER_CALL_TIMEOUT: Duration = Duration::from_secs(160);
 
+type Agenda = everyware_catalog::calendar::Agenda;
 type News = everyware_catalog::news::NewsFeed;
 type Thumbnail = everyware_catalog::news::NewsThumbnail;
 type Thumbnails = everyware_catalog::news::NewsThumbnails;
@@ -69,6 +70,7 @@ struct Last {
     wifi_networks: Option<WifiNetworks>,
     wifi_state: Option<WifiState>,
     matter_devices: Option<MatterDevices>,
+    agenda: Option<Agenda>,
     /// The settings groups the screen shows, by name (settings.rs).
     settings: std::collections::BTreeMap<String, user_preferences_api::change_notifier::OnSettingsChangeRequest>,
 }
@@ -179,6 +181,9 @@ async fn sdv_main(context: ContextRef, comms: Arc<dyn Communicate>) -> SdvResult
     // The Matter devices on their own too: the subscriptions below wait for their publishers
     // one after the other.
     tokio::spawn(matter_link(comms.clone(), screen.clone(), last.clone(), services.clone()));
+    // The agenda on its own as well: the subscriptions below wait for their publishers one after
+    // the other, and a product may carry the calendar without the news or the other way round.
+    tokio::spawn(agenda_link(comms.clone(), screen.clone(), last.clone()));
     // The publishers may start later than this bundle: every subscription waits on its own.
     // Every topic is state (the weather now, the feed now, the networks now): a subscription
     // gets the publication's last message at once (read_on_subscribe), so what a bundle
@@ -293,6 +298,36 @@ async fn handle_thumbnail_observer(mut observer: Observer<Thumbnails>, screen: A
         }
     }
     warn!("the thumbnail stream ended");
+}
+
+/// The agenda to the screen, once its publication is there.
+async fn agenda_link(comms: Arc<dyn Communicate>, screen: Arc<Screen>, last: Arc<Mutex<Last>>) {
+    let Ok(latest) = SubscribeOptions::builder().read_on_subscribe(true).build() else { return };
+    let agenda = SubscriberDescriptors::<Agenda>::AGENDA;
+    if wait_for_publisher_to_be_available(comms.as_ref(), agenda).await.is_ok() {
+        match clientlib::create_observer(comms.as_ref(), agenda, &latest).await {
+            Ok(observer) => handle_agenda_observer(observer, screen, last).await,
+            Err(e) => error!("Failed to create observer Agenda#agenda: {e:?}"),
+        }
+    }
+}
+
+/// Every agenda goes to the screen; the last one is kept.
+async fn handle_agenda_observer(mut observer: Observer<Agenda>, screen: Arc<Screen>, last: Arc<Mutex<Last>>) {
+    info!("subscribed to Agenda#agenda");
+    while let Some(message) = observer.next().await {
+        match message {
+            Ok(messages) => {
+                for agenda in messages {
+                    info!("agenda: {:?}, {} events", agenda.link, agenda.events.len());
+                    screen.publish_agenda(&agenda);
+                    last.lock().expect("last values").agenda = Some(agenda);
+                }
+            }
+            Err(e) => error!("Error receiving message on Agenda#agenda: {e:?}"),
+        }
+    }
+    warn!("the agenda stream ended");
 }
 
 /// Every message of the networks topic goes to the screen; the last one is kept.
@@ -443,7 +478,7 @@ async fn handle_screen(screen: Arc<Screen>, last: Arc<Mutex<Last>>, mut deaths: 
 
 /// The last values to a panel that starts from nothing.
 fn resend(screen: &Screen, last: &Mutex<Last>) {
-    let (weather, news, thumbnails, networks, state, matter, settings) = {
+    let (weather, news, thumbnails, networks, state, matter, agenda, settings) = {
         let last = last.lock().expect("last values");
         (
             last.weather.clone(),
@@ -452,6 +487,7 @@ fn resend(screen: &Screen, last: &Mutex<Last>) {
             last.wifi_networks.clone(),
             last.wifi_state.clone(),
             last.matter_devices.clone(),
+            last.agenda.clone(),
             last.settings.values().cloned().collect::<Vec<_>>(),
         )
     };
@@ -472,6 +508,9 @@ fn resend(screen: &Screen, last: &Mutex<Last>) {
     }
     if let Some(matter) = matter {
         screen.publish_matter_devices(&matter);
+    }
+    if let Some(agenda) = agenda {
+        screen.publish_agenda(&agenda);
     }
     for group in &settings {
         screen.publish_settings(group);

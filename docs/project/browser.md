@@ -2,12 +2,14 @@
 
 Experimental, and off by default: the browser runs WPE WebKit from a Debian root, entered as
 root, without WebKit's sandbox (see Security). An image has it only when it is built with
-`EVERYWARE_EXPERIMENTAL_BROWSER=true`; without it a tap on a news story opens nothing. Why it
+`EVERYWARE_BROWSER=true`; without it the panel is built without its browser code. Why it
 is built this way, and the options weighed: [#24](https://github.com/sdv-everyware/everyware/issues/24).
 Its open security problems: [#54](https://github.com/sdv-everyware/everyware/issues/54), points 1 and 4.
 
-A web page runs in a process of its own and shows in the panel's right side; a tap on a news
-story opens its page there. A fault in the browser never takes the dashboard. The device has no
+A web page runs in a process of its own, for the panel's right side (`#panel/browser`). The
+dashboard has no entry to that panel while the agenda fills the right column, so nothing shows a
+page now: the flag builds and installs the browser and the panel's browser code, and Cog runs
+unseen. A fault in the browser never takes the dashboard. The device has no
 browser of its own (no Java, no WebView), so the browser comes from a Debian root next to the
 system. An image built with the flag starts it by itself when the device has that root; the root is put on the
 device once and is not part of the image.
@@ -36,15 +38,17 @@ cog --platform=wl URL                        WPE WebKit in a Debian root, user b
 ## Turning it on
 
 ```
-export EVERYWARE_EXPERIMENTAL_BROWSER=true   # or set it in the product's makefile
+export EVERYWARE_BROWSER=true   # or set it in the product's makefile
 m
 ```
 
 The image then has the service `everyware_browser`, its scripts, and
-`ro.vendor.everyware.browser=true`. The panel reads that property once at start: with it, a tap
-on a story opens the page, and an ordinary Wayland window (Cog) shows in the panel. Without it the
-panel keeps its Wayland socket for harry's own clients (`har_zone`) and gives no zone to other
-windows. The variable lives in the shell: a later `m` without it builds the image without the
+`ro.vendor.everyware.browser=true`, and the panel is built with its browser code (Soong's
+`everyware`/`browser`, the cfg `browser` of smarthome_app). The panel reads the property once at
+start: with it, an ordinary Wayland window (Cog) binds to the zone `#panel/browser`, which is drawn
+only while the panel is open, and nothing on the dashboard opens the panel. Without the variable
+the panel has no browser code and keeps its Wayland socket for harry's own clients (`har_zone`);
+it gives no zone to other windows. The variable lives in the shell: a later `m` without it builds the image without the
 browser.
 
 ## The Debian root, once per board
@@ -90,7 +94,8 @@ vendor/sdv-everyware/everyware/scripts/run-browser-rb3.sh stop       # the insta
 It needs an image built with the flag (the panel reads `ro.vendor.everyware.browser`); without
 it `start` stops with a message. `start` stops the installed panel and browser and runs the built panel from `/data/local/tmp`
 with zones on (socket and FIFOs there); nothing in the image changes, and a reboot brings the
-installed ones back.
+installed ones back. Cog starts and binds to the panel's zone, but nothing on the dashboard
+opens the panel: the page is not seen, and `measure` and `drag` measure a browser nobody sees.
 
 ## Modes
 
@@ -119,7 +124,7 @@ and `har_zone` for harry clients.
 
 | Threat | State | What holds it |
 |---|---|---|
-| A crafted URL in the news feed (`javascript:`, `file:`, `data:`, a second line) | closed | the app sends only `http` and `https` and its own `about:blank`, one line of at most 2048 bytes (`browser.rs`); the relay checks the same again |
+| A crafted URL (`javascript:`, `file:`, `data:`, a second line) | closed | the app sends only `http` and `https` and its own `about:blank`, one line of at most 2048 bytes (`browser.rs`); the relay checks the same again |
 | Writing to the FIFOs from outside | closed for apps | 0660 root:2900; opened with `O_NOFOLLOW`, only if a FIFO |
 | The socket and the FIFOs in a directory others can write | closed for the installed browser | `/data/vendor/everyware/run`, 0750 root:2900; a developer's run still uses `/data/local/tmp` |
 | Root opening a file in a directory the browser's user can write | closed for the installed browser | the logs are opened by the browser's own shell in its home; a developer's run still keeps the relay's pid file and two logs in the root's `/tmp` |

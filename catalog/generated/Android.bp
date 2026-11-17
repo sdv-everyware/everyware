@@ -59,6 +59,22 @@ rust_library {
 }
 
 genrule {
+    name: "libsdv_mw_rs_com_everyware_calendar_service_bundle_rs",
+    tools: ["extract_catalog_zip"],
+    srcs: [":vsidlc_everyware_catalog_files"],
+    out: ["service_bundle.rs"],
+    cmd: "$(location extract_catalog_zip) $(in) --service-bundle com.everyware CalendarServiceBundle",
+}
+
+rust_library {
+    name: "libsdv_mw_rs_com_everyware_calendar_service_bundle",
+    crate_name: "sdv_mw_rs_com_everyware_calendar_service_bundle",
+    defaults: ["everyware_generated_bundle_defaults"],
+    crate_root: ":libsdv_mw_rs_com_everyware_calendar_service_bundle_rs{service_bundle.rs}",
+    srcs: [":libsdv_mw_rs_com_everyware_calendar_service_bundle_rs"],
+}
+
+genrule {
     name: "libsdv_mw_rs_com_everyware_wifi_service_bundle_rs",
     tools: ["extract_catalog_zip"],
     srcs: [":vsidlc_everyware_catalog_files"],

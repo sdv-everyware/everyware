@@ -1,0 +1,80 @@
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//      http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+// com.everyware.calendar: CalendarServiceBundle, its manifest and its orchestration config.
+
+package {
+    default_applicable_licenses: ["Android-Apache-2.0"],
+}
+
+apex {
+    name: "com.everyware.calendar",
+    manifest: "apex_manifest.json",
+    file_contexts: "file_contexts",
+    key: "com.everyware.calendar.key",
+    prebuilts: [
+        "com.everyware.calendar.service_bundles_manifest",
+        "com.everyware.calendar.linker_config",
+        "com.everyware.calendar.orch",
+        "com.everyware.calendar.permissions",
+    ],
+    updatable: false,
+    product_specific: true,
+    arch: {
+        arm64: {
+            native_shared_libs: ["libeveryware_calendar_bundle"],
+        },
+        x86_64: {
+            native_shared_libs: ["libeveryware_calendar_bundle"],
+        },
+        riscv64: {
+            enabled: false,
+        },
+    },
+}
+
+// Test key, generated for this project. A device that ships signs with its own.
+apex_key {
+    name: "com.everyware.calendar.key",
+    public_key: "keys/com.everyware.calendar.avbpubkey",
+    private_key: "keys/com.everyware.calendar.pem",
+}
+
+prebuilt_etc {
+    name: "com.everyware.calendar.service_bundles_manifest",
+    src: "sdv_service_bundles_manifest.textproto",
+    filename: "sdv_service_bundles_manifest.textproto",
+    installable: false,
+}
+
+linker_config {
+    name: "com.everyware.calendar.linker_config",
+    src: "linker.config.json",
+    installable: false,
+}
+
+prebuilt_etc {
+    name: "com.everyware.calendar.orch",
+    src: "CalendarServiceBundleOrchestration.textproto",
+    filename: "CalendarServiceBundleOrchestration.textproto",
+    sub_dir: "orch",
+    installable: false,
+}
+
+// The authz policy of the bundle, read by the agents at boot.
+prebuilt_etc {
+    name: "com.everyware.calendar.permissions",
+    src: "permissions.textproto",
+    sub_dir: "permissions",
+    filename: "calendar_permissions.textproto",
+    installable: false,
+}

@@ -161,6 +161,7 @@ reconnect: `bundles/dashboard`. Nothing in a bundle draws or knows the Figma nam
 | `bundles/news` | publisher of two topics: a feed and a picture per item; reads pages and pictures from the internet (untrusted data, decoded in the bundle), HTTPS through `libs/https` | `bundles/news/README.md` |
 | `bundles/dashboard` | the bridge: subscribes to the topics the screen shows, pushes them over gRPC to the harry process (no SDV participant), takes the screen's commands from a gRPC server stream and calls `WifiService` for each, the answer back to the screen | `bundles/dashboard/README.md` (why a bridge at all) |
 | `bundles/wifi` | owns a device: talks to wpa_supplicant's control interface, publishes state, serves the RPC `WifiService` | `bundles/wifi/README.md` (how the supplicant is reached, the security) |
+| `bundles/calendar` | publisher for an account: links a Google account by OAuth (a setup page on the local network while there is none, a QR code on the screen), keeps the refresh token in its directory, reads an API with it | `bundles/calendar/README.md` (the link, the relay page, the security) |
 
 ### A bundle that owns a device (the Wi-Fi pattern)
 

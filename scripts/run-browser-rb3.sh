@@ -1,7 +1,7 @@
 #!/bin/bash
 # run-browser-rb3.sh -- run a developer's build of the panel with a browser zone on the RB3
 # and measure it. The browser is experimental: the image must be built with
-# EVERYWARE_EXPERIMENTAL_BROWSER=true (product/everyware.mk), else the panel opens nothing.
+# EVERYWARE_BROWSER=true (product/everyware.mk), and the panel with its browser code.
 # What runs, the Debian root it needs and the modes: docs/project/browser.md.
 #
 #   run-browser-rb3.sh start [--no-zone-plane] [--zone-redraw timer|frames] [--zone-fps N] [URL]
@@ -10,14 +10,15 @@
 #       --zone-plane (the browser on a hardware plane of its own: a page's frame costs no redraw
 #       of the dashboard; --no-zone-plane composites it on the GPU instead, and only then
 #       --zone-redraw chooses when the dashboard is redrawn for the zone), wait for
-#       the socket, start Cog in the Debian root as user `browser`. Cog shows in the dashboard's
-#       right panel (#panel/browser): a tap on a news story opens its page there. The page goes
-#       from the dashboard through the FIFO /data/local/tmp/har-browser-open (0660 root:2900)
-#       to har-browser-relay.sh (uid browser), which runs cogctl over a D-Bus session bus that
-#       exists only inside the root. Back, har-browser-cog.sh runs Cog and writes one word per
-#       page event (committed, loaded, failed) to /data/local/tmp/har-browser-events (0660
-#       root:2900): the dashboard's loader goes when the page shows. URL (default
-#       about:blank) is Cog's first page.
+#       the socket, start Cog in the Debian root as user `browser`. Cog binds to the zone of the
+#       dashboard's right panel (#panel/browser), and nothing on the dashboard opens that panel
+#       while the agenda fills the right column: the page is not seen, and measure and drag
+#       measure a browser nobody sees. A page goes from the panel through the FIFO
+#       /data/local/tmp/har-browser-open (0660 root:2900) to har-browser-relay.sh (uid browser),
+#       which runs cogctl over a D-Bus session bus that exists only inside the root. Back,
+#       har-browser-cog.sh runs Cog and writes one word per page event (committed, loaded,
+#       failed) to /data/local/tmp/har-browser-events (0660 root:2900) for the panel's loader.
+#       URL (default about:blank) is Cog's first page.
 #       Env: WEBKIT_DEBUG=Events,Scrolling   passed to Cog (its log: /home/browser/cog.log in
 #                                            the root, /data/glibc/rootfs/home/browser/cog.log)
 #   run-browser-rb3.sh stop                  kill master + browser, start the installed panel
@@ -75,7 +76,7 @@ cmd_start() {
   for _ in $(seq 20); do [ "$(A shell id -u | tr -d '\r')" = 0 ] && break; sleep 1; done
   # before the installed panel is stopped: a start that cannot work leaves the board as it is
   [ -f "$BIN" ] || { echo "!! $BIN is not built (m smarthome_app)" >&2; exit 1; }
-  [ "$(A shell getprop ro.vendor.everyware.browser | tr -d '\r')" = true ] || { echo "!! the image has no browser: build it with EVERYWARE_EXPERIMENTAL_BROWSER=true (docs/project/browser.md)" >&2; exit 1; }
+  [ "$(A shell getprop ro.vendor.everyware.browser | tr -d '\r')" = true ] || { echo "!! the image has no browser: build it with EVERYWARE_BROWSER=true (docs/project/browser.md)" >&2; exit 1; }
   A shell 'test -x /data/glibc/rootfs/usr/bin/cog' || { echo "!! no Debian root with Cog on the board (docs/project/browser.md)" >&2; exit 1; }
   # the installed browser first: its script would start Cog again
   A shell stop everyware_browser 2>/dev/null || true

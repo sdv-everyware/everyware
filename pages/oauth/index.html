@@ -1,0 +1,90 @@
+<!doctype html>
+<!--
+  Licensed under the Apache License, Version 2.0 (the "License");
+  you may not use this file except in compliance with the License.
+  You may obtain a copy of the License at
+
+      http://www.apache.org/licenses/LICENSE-2.0
+
+  Unless required by applicable law or agreed to in writing, software
+  distributed under the License is distributed on an "AS IS" BASIS,
+  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+  See the License for the specific language governing permissions and
+  limitations under the License.
+
+  The relay page of the calendar link (bundles/calendar/README.md). Google sends the browser
+  here after the consent screen, because Google takes only an https address as the redirect
+  of a web client. The page sends the browser on to the panel's setup page on the local
+  network, whose address is in the OAuth state: http://<panel>/callback?code=..&state=..
+  Only what the panel writes there is taken: a private IPv4 address (10/8, 172.16/12,
+  192.168/16), or 127.0.0.1 for development, with the setup page's port 8765.
+  The page loads nothing, keeps nothing and sends nothing anywhere else.
+  The CSP's hash is the script's: pages/test/oauth.test.js checks it.
+-->
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="referrer" content="no-referrer">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'sha256-peA6dNvCpfHtYpOEI3d1Fdwwso1+zeKuiC9caGL+kO8='">
+<title>Calendar link</title>
+<style>
+  body { font: 18px/1.5 system-ui, sans-serif; margin: 2em auto; max-width: 32em; padding: 0 1em; color: #222; background: #fff; }
+  a { display: inline-block; margin-top: 0.5em; padding: 0.6em 1.4em; border-radius: 0.4em; background: #333; color: #fff; text-decoration: none; }
+</style>
+<p id="message">Back to your panel.</p>
+<p><a id="continue" hidden>Continue</a></p>
+<noscript><p>This page needs JavaScript to send you back to your panel.</p></noscript>
+<script>
+// The panel's address in the state (base64url of {"p": "address:8765", "n": nonce}), when it is
+// one the panel writes; else null.
+function panelOf(state) {
+  if (state.length > 512) return null;
+  var base64 = state.replace(/-/g, '+').replace(/_/g, '/');
+  while (base64.length % 4) base64 += '=';
+  var json;
+  try { json = JSON.parse(atob(base64)); } catch (e) { return null; }
+  var p = json && json.p;
+  if (typeof p !== 'string') return null;
+  var m = /^([0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}):8765$/.exec(p);
+  if (!m || !isPanelAddress(m[1])) return null;
+  return m[1] + ':8765';
+}
+
+// A private IPv4 address (10/8, 172.16/12, 192.168/16), or 127.0.0.1.
+function isPanelAddress(host) {
+  if (host === '127.0.0.1') return true;
+  var m = /^([0-9]{1,3})\.([0-9]{1,3})\.([0-9]{1,3})\.([0-9]{1,3})$/.exec(host);
+  if (!m) return false;
+  var parts = m.slice(1);
+  // no leading zeros: some resolvers read them as octal
+  if (parts.some(function (s) { return s.length > 1 && s[0] === '0'; })) return false;
+  var o = parts.map(Number);
+  if (o.some(function (x) { return x > 255; })) return false;
+  return o[0] === 10 || (o[0] === 172 && o[1] >= 16 && o[1] <= 31) || (o[0] === 192 && o[1] === 168);
+}
+
+// Where Google's answer (the query of this page) goes: {target} or {error}.
+function relay(search) {
+  var q = new URLSearchParams(search);
+  var error = q.get('error');
+  if (error) return { error: 'Google did not link the calendar (' + error.slice(0, 64) + '). Scan the code on the panel to try again.' };
+  var code = q.get('code'), state = q.get('state');
+  if (!code || !state) return { error: 'This page continues a link started on your panel. Scan the code on the panel.' };
+  var panel = panelOf(state);
+  if (!panel) return { error: 'This link does not lead to a panel on your network.' };
+  return { target: 'http://' + panel + '/callback?code=' + encodeURIComponent(code) + '&state=' + encodeURIComponent(state) };
+}
+
+var answer = relay(location.search);
+var message = document.getElementById('message');
+if (answer.target) {
+  var link = document.getElementById('continue');
+  link.href = answer.target;
+  link.hidden = false;
+  message.textContent = 'Back to your panel. If nothing happens, tap Continue.';
+  location.replace(answer.target);
+} else {
+  message.textContent = answer.error;
+}
+</script>
+</html>

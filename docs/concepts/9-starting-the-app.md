@@ -86,14 +86,14 @@ sequenceDiagram
     I->>S: start smarthome (root, vendor_harplatform)
     S->>S: load the design, open card0 (DRM master), the GPU, the touch device
     S->>S: first frame (the design as fetched)
-    D-->>S: gRPC 127.0.0.1:7100: weather, news, Wi-Fi (the last values first, then new ones)
+    D-->>S: weather, agenda, Wi-Fi (the last values first, then new ones)
 ```
 
-The screen shows the design and the house's data together: the weather and the news bundles
-publish their last values, kept from the previous start, as soon as the lifecycle manager
+The screen shows the design and the house's data together: the weather bundle publishes its
+last values, kept from the previous start, as soon as the lifecycle manager
 starts them (about 6 s), and the bridge gets them when it subscribes (`read_on_subscribe`).
 The new values follow once the network is up (about 18 to 20 s on the RB3:
-[bundles/weather](../../bundles/weather/README.md), [bundles/news](../../bundles/news/README.md)).
+[bundles/weather](../../bundles/weather/README.md)).
 
 ## The libraries
 

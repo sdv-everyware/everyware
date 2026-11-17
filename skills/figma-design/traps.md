@@ -12,7 +12,7 @@
 | A picture never shows | it sits on a rounded rectangle | a plain frame inside a clipping frame with the corners |
 | A designer-only frame reaches the .dcf | it was put under `#smarthome-root` | Page 1 outside the root; `check-figma.sh` (contract check) fails on it |
 | A prototype tap does nothing in Play | the target is not a frame, or the overlay settings are missing | overlays are frames with `overlayPositionType` set; read the taps back (`check-figma.sh`, prototype) |
-| A new tap works on the root but not in Play | Play starts at "Screen · Overview", a copy of the root's parts made by prototype-patch.js; a tap put on the root's node (`nodes.find`) is not on the copy | put it on the copy too: `within(ov, '#name')` (as `#settings`, the tile headers, `#news/list`); `check-figma.sh` then lists the tap twice |
+| A new tap works on the root but not in Play | Play starts at "Screen · Overview", a copy of the root's parts made by prototype-patch.js; a tap put on the root's node (`nodes.find`) is not on the copy | put it on the copy too: `within(ov, '#name')` (as `#settings`, the tile headers, `#agenda/list`); `check-figma.sh` then lists the tap twice |
 | A tap inside a card in Play does nothing | the button is part of an instance | a hotspot frame over it |
 | Paths break in a shell loop (`$UL:core` becomes garbage) | zsh applies `:c`, `:h`, `:r` as modifiers to `$VAR:...` | `${VAR}` or run the loop in `bash -c` |
 | The app does not drive a part the design has | the part is drawn, not a named node or slot | name it (`#screen/part`) or make it a slot; tell the user if a drawn element should become a library component |

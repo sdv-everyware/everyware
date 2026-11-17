@@ -65,4 +65,11 @@ interface IScreenLink {
      * Sent for each group the bundle follows, at subscribe and on every change.
      */
     void publishSettings(in byte[] settings);
+
+    /**
+     * The agenda of the house and the state of the calendar link: a com.everyware.Agenda
+     * (catalog/calendar.proto). On every update and again after the panel (re)started. While no
+     * account is linked it carries the setup page's URL for the QR code.
+     */
+    void publishAgenda(in byte[] agenda);
 }
