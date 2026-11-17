@@ -16,7 +16,12 @@ const C = {
   ink: hex('#24364c'), ink2: hex('#6c7e93'), muted: hex('#a3b1c2'),
   accent: hex('#4268b2'), accentPressed: hex('#35558f'), accentDisabled: hex('#a9bad9'),
   accentSoft: hex('#e6edf9'), accentSoftPressed: hex('#d3def2'),
-  error: hex('#c0392b'),
+  // the tones (ui-lib core tone.rs): a strong fill (its label white, ink on the warning's
+  // yellow), a soft fill, the ink of a label on the soft fill or on white, and their pressed
+  // shades; every label passes WCAG AA (4.5:1) on its fill
+  success: hex('#2e7d32'), successPressed: hex('#256b29'), successSoft: hex('#e3f1e5'), successSoftPressed: hex('#cfe6d3'), successInk: hex('#1e6b2a'),
+  warning: hex('#f4b400'), warningPressed: hex('#dca200'), warningSoft: hex('#fdf3d6'), warningSoftPressed: hex('#f9e7b0'), warningInk: hex('#7a5200'),
+  error: hex('#c0392b'), errorPressed: hex('#a8322a'), errorSoft: hex('#fbe7e5'), errorSoftPressed: hex('#f6d2ce'), errorInk: hex('#a8322a'),
   panel: hex('#dfe7f3'), special: hex('#c9d6ea'), // keyboard: panel, Shift/Delete/123
   line: hex('#b9cbe5'), track: hex('#c9d6ea'), surface: hex('#f4f7fb'), page: hex('#eaf0f7'),
   white: [1, 1, 1],
