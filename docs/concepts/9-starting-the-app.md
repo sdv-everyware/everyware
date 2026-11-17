@@ -156,6 +156,11 @@ adb shell 'getprop | grep -E "init.svc.(everyware_|smarthome)"; ps -AZ | grep -E
 adb shell 'dmesg | grep avc | grep -E "everyware_(camera|game)"'
 ```
 
+A clean start logs two denials of the camera and nothing else: `getattr` on `/system/etc/aconfig`
+and on `/system/etc/perfetto`, the libraries' look at the platform's flag and tracing
+configuration. Their types are private to the platform's policy, so the board's vendor policy
+can neither allow nor silence them; the camera does not need either directory.
+
 ## Updating and developing
 
 A product's update goes through the SDV Update Manager, with a rollback when the new version
