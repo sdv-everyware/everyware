@@ -144,7 +144,8 @@ In git:
   `main` is the user's decision.
 - **Read the staged diff before a commit:** bugs, claims that are not true, files of another
   session, anything private.
-- Author `Daniel Georg <passenger6@gmail.com>`; no AI attribution and no co-author trailer.
+- Author from local git configuration (`git config user.name` and `git config user.email`); no AI
+  attribution and no co-author trailer.
 - Nothing private in the history: no personal user id, no work e-mail address, no absolute path
   of a home or a mount, no Figma file key, no token. A Figma token is only ever exported by the
   user in their own shell.
