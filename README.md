@@ -192,7 +192,7 @@ manifest and the two forks in the tree (Google's harry, Linaro's board support) 
 | `libs/` | what the bundles share: `https` (TLS on BoringSSL), `bundle-store` (a bundle's own files: its last values, so that they are on the screen at the first frame, and private ones such as the calendar's grant, mode 0600) |
 | `product/` | `everyware.mk` and the SELinux contexts of the bundles: what a device product adds to carry them |
 | `design/figma/` | the kiwi tools: a Figma file written and read without Figma, the roundtrip, `fig2json` |
-| `tools/` | `dcf` (a `.dcf` from Figma or from a `.fig`, the node by node comparison), `matter-generator` (a virtual Matter device on the laptop), `boot-time` (power on to the first frame, measured) |
+| `tools/` | `dcf` (a `.dcf` from Figma or from a `.fig`, the node by node comparison), `matter-generator` (a virtual Matter device on the laptop), `boot-time` (power on to the first frame, measured), `fbgrab` (dumps the active DRM framebuffer to raw RGBA for boards without SurfaceFlinger) |
 | `scripts/` | the design path (`fetch-dcf.sh`, `fig-to-dcf.sh`), the board (`deploy-bundle-rb3.sh`, `run-smarthome-rb3.sh`, `calendar-client.sh`), the process (`feature.sh`, the git hooks) |
 | `skills/` | step by step instructions for an agent: a service bundle, a Figma design, the review of a branch (the UI library and the apps have theirs in `ui-lib/skills`) |
 | `pages/` | static web pages: `oauth/`, the relay page of the calendar link, and its test |
