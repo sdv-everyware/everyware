@@ -2,21 +2,24 @@
 //! codes it is given, reads what their clusters report every two seconds and publishes all of
 //! them as one message on the topic `matter-devices` (catalog/matter.proto), and offers the
 //! MatterService RPC (catalog/matter_service.proto): pairing and the devices' commands, each
-//! answered when the device acknowledged it.
+//! answered when the device acknowledged it. The names the house gives the devices are kept
+//! here (names.rs) and published with them.
 //!
 //! The shape is the service bundle vsidlc generates (`vsidlc --services`): a `ServiceBundle`
 //! with `SdvComms`, a current-thread runtime, `sdv_main` with the publisher and the RPC server.
 //! The Matter side is `everyware_matter_client` (client/): a controller on a thread of its own.
 
 use everyware_catalog::matter::{MatterDevices, MatterEndpoint, MatterFan, MatterHumidity, MatterLevel, MatterNode, MatterOnOff, MatterThermostat};
-use everyware_catalog::matter_service::{MatterMoveToLevel, MatterPair, MatterResult, MatterSetFanMode, MatterSetOnOff, MatterSetSetpoint, MatterSetSystemMode};
+use everyware_catalog::matter_service::{
+    MatterMoveToLevel, MatterPair, MatterRename, MatterResult, MatterSetFanMode, MatterSetOnOff, MatterSetSetpoint, MatterSetSystemMode,
+};
 use everyware_matter_client::{Command, Config, Controller, Snapshot};
 use log::{error, info, warn};
 use sdv::mw::{clientlib, Communicate, Publisher, SdvComms};
 use sdv::status::{SdvResult, SdvStatus, SdvStatusCode};
 use sdv_mw_rs_com_everyware_matter_service_bundle::{MatterServiceBundle as Bundle, PublisherDescriptors};
 use std::path::PathBuf;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tokio::sync::{mpsc, oneshot};
 use tokio::time::timeout;
@@ -32,6 +35,12 @@ const PAIRING_CODES: &str = "/apex/com.everyware.matter/etc/matter/pairing.txt";
 /// A command waits this long for the device; pairing longer (two phases of up to a minute).
 const COMMAND_TIMEOUT: Duration = Duration::from_secs(20);
 const PAIR_TIMEOUT: Duration = Duration::from_secs(150);
+
+mod names;
+use names::Names;
+
+/// The devices the last poll read: (node id, endpoint). A name is given only to one of them.
+type Known = Arc<Mutex<Vec<(u64, u16)>>>;
 
 sdv::lifecycle::register_service_bundle!(MatterServiceBundle);
 
@@ -89,6 +98,11 @@ async fn sdv_main(comms: Arc<dyn Communicate>, dir: PathBuf) -> SdvResult<()> {
             Vec::new()
         });
     let (snapshots_tx, mut snapshots) = mpsc::unbounded_channel::<Snapshot>();
+    let names = Arc::new(Mutex::new(Names::load(&dir)));
+    info!("{} device name(s)", names.lock().expect("names").len());
+    let known: Known = Arc::default();
+    // a new name: the devices go out again with it
+    let (renamed_tx, mut renamed) = mpsc::unbounded_channel::<()>();
     let config = Config { dir, interface: INTERFACE.to_string(), codes, poll: POLL };
     info!("controller in {}, on {INTERFACE}, {} pairing code(s)", config.dir.display(), config.codes.len());
     let controller = Arc::new(
@@ -97,7 +111,7 @@ async fn sdv_main(comms: Arc<dyn Communicate>, dir: PathBuf) -> SdvResult<()> {
         }))
         .map_err(|e| SdvStatus::with_message(SdvStatusCode::Internal, format!("the Matter controller: {e}")))?,
     );
-    let _service_bundle = match Bundle::builder().set_comms(comms.clone()).set_server_matter(Arc::new(MatterServiceRpc { controller })).build().await {
+    let _service_bundle = match Bundle::builder().set_comms(comms.clone()).set_server_matter(Arc::new(MatterServiceRpc { controller, names: names.clone(), known: known.clone(), renamed: renamed_tx })).build().await {
         Ok(service) => service,
         Err(e) => {
             error!("Failed to build service bundle: {e}");
@@ -109,15 +123,36 @@ async fn sdv_main(comms: Arc<dyn Communicate>, dir: PathBuf) -> SdvResult<()> {
         e
     })?;
     info!("serving MatterService on the channel matter");
-    publish_loop(publisher, &mut snapshots).await;
+    publish_loop(publisher, &mut snapshots, &mut renamed, &names, &known).await;
     Ok(())
 }
 
-/// Every poll that changed something goes out.
-async fn publish_loop(publisher: Publisher<MatterDevices>, snapshots: &mut mpsc::UnboundedReceiver<Snapshot>) {
+/// Every poll that changed something goes out, and the last poll again when a device got
+/// another name.
+async fn publish_loop(
+    publisher: Publisher<MatterDevices>,
+    snapshots: &mut mpsc::UnboundedReceiver<Snapshot>,
+    renamed: &mut mpsc::UnboundedReceiver<()>,
+    names: &Mutex<Names>,
+    known: &Known,
+) {
     let mut last: Option<MatterDevices> = None;
-    while let Some(snapshot) = snapshots.recv().await {
-        let message = to_message(&snapshot);
+    let mut snapshot: Option<Snapshot> = None;
+    loop {
+        tokio::select! {
+            s = snapshots.recv() => match s {
+                Some(s) => {
+                    *known.lock().expect("known devices") =
+                        s.nodes.iter().flat_map(|n| n.endpoints.iter().map(move |e| (n.node_id, e.id))).collect();
+                    snapshot = Some(s);
+                }
+                None => break,
+            },
+            // the sender is the RPC server's, which lives as long as the bundle
+            r = renamed.recv() => if r.is_none() { break },
+        }
+        let Some(snapshot) = &snapshot else { continue };
+        let message = to_message(snapshot, &names.lock().expect("names"));
         if last.as_ref() == Some(&message) {
             continue;
         }
@@ -129,8 +164,9 @@ async fn publish_loop(publisher: Publisher<MatterDevices>, snapshots: &mut mpsc:
     warn!("the Matter controller stopped");
 }
 
-/// The snapshot as the catalog's message (strings within the catalog's sizes).
-fn to_message(s: &Snapshot) -> MatterDevices {
+/// The snapshot as the catalog's message (strings within the catalog's sizes), each endpoint
+/// with the name the house gave it.
+fn to_message(s: &Snapshot, names: &Names) -> MatterDevices {
     let cut = |text: &str, max: usize| -> String {
         let mut end = text.len().min(max);
         while !text.is_char_boundary(end) {
@@ -164,6 +200,7 @@ fn to_message(s: &Snapshot) -> MatterDevices {
                     let mut ep = MatterEndpoint::new();
                     ep.id = u32::from(e.id);
                     ep.device_type = e.device_type;
+                    ep.name = names.get(n.node_id, e.id).to_string();
                     if let Some(t) = &e.thermostat {
                         let mut x = MatterThermostat::new();
                         x.local_temperature_c = t.local_temperature_c.unwrap_or_default();
@@ -225,6 +262,10 @@ fn to_message(s: &Snapshot) -> MatterDevices {
 /// answer.
 struct MatterServiceRpc {
     controller: Arc<Controller>,
+    names: Arc<Mutex<Names>>,
+    known: Known,
+    /// Tells the publish loop that a device has another name.
+    renamed: mpsc::UnboundedSender<()>,
 }
 
 impl MatterServiceRpc {
@@ -284,5 +325,30 @@ impl com_everyware_matter_service_rpc::Interface for MatterServiceRpc {
 
     async fn SetFanMode(&self, _caller_id: sdv::comms::id::ServiceFqin, r: &MatterSetFanMode) -> SdvResult<MatterResult> {
         self.ask(Command::SetFanMode { node_id: r.node_id, endpoint: endpoint(r.endpoint)?, mode: r.mode.clone() }, COMMAND_TIMEOUT).await
+    }
+
+    /// The name is the bundle's to keep: no command to the device.
+    async fn Rename(&self, _caller_id: sdv::comms::id::ServiceFqin, r: &MatterRename) -> SdvResult<MatterResult> {
+        let endpoint = endpoint(r.endpoint)?;
+        let mut result = MatterResult::new();
+        result.node_id = r.node_id;
+        if !self.known.lock().expect("known devices").contains(&(r.node_id, endpoint)) {
+            result.error = "no such device".to_string();
+            return Ok(result);
+        }
+        match self.names.lock().expect("names").set(r.node_id, endpoint, &r.name) {
+            Ok(changed) => {
+                result.ok = true;
+                if changed {
+                    info!("node {:#x} endpoint {endpoint}: named {:?}", r.node_id, names::clean(&r.name));
+                    let _ = self.renamed.send(());
+                }
+            }
+            Err(e) => {
+                warn!("node {:#x} endpoint {endpoint}: the name was not kept: {e}", r.node_id);
+                result.error = format!("the name was not kept: {e}").chars().take(96).collect();
+            }
+        }
+        Ok(result)
     }
 }

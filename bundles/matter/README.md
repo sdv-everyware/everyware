@@ -13,16 +13,30 @@ flowchart LR
     DEV <-- "Matter over IPv6 (wlan0): PASE, CASE, reads, commands" --> MB
     MB["MatterServiceBundle<br/>bundles/matter"] -. "topic matter-devices<br/>(all nodes, one message)" .-> DB["DashboardServiceBundle<br/>bridge"]
     DB -- "SDV RPC MatterService (channel matter)" --> MB
-    MB <-- "fabric.bin, nodes.txt" --> ST[("/data/service_bundle_data/<br/>com.everyware.matter/MatterServiceBundle")]
+    MB <-- "fabric.bin, nodes.txt, names.txt" --> ST[("/data/service_bundle_data/<br/>com.everyware.matter/MatterServiceBundle")]
 ```
 
 ## What goes where
 
 | | Topic `matter-devices` (`MatterDevices`) | RPC `MatterService` |
 |---|---|---|
-| what | per node: online, last seen, Basic Information (vendor, product, serial, software version, VID, PID), uptime, boot reason; per endpoint the device type and the clusters it serves: Thermostat, Relative Humidity, On/Off, Level Control, Fan Control | `Pair(code)`, `SetOnOff`, `MoveToLevel`, `SetSetpoint`, `SetSystemMode`, `SetFanMode`; each answers `MatterResult` (ok, why not, node id) |
+| what | per node: online, last seen, Basic Information (vendor, product, serial, software version, VID, PID), uptime, boot reason; per endpoint the device type, the name the house gave it and the clusters it serves: Thermostat, Relative Humidity, On/Off, Level Control, Fan Control | `Pair(code)`, `SetOnOff`, `MoveToLevel`, `SetSetpoint`, `SetSystemMode`, `SetFanMode`, `Rename`; each answers `MatterResult` (ok, why not, node id) |
 | when | after a poll that changed something: a poll starts 2 s after the last one and takes 2 to 4 s for the four virtual devices (one transaction per attribute) | when the device acknowledged the command (a pairing: up to two minutes) |
 | why so | one message: a subscriber that comes late gets the last message of a topic (`read_on_subscribe`), so it gets every device | a command has an outcome; the new state comes with the next poll, started at once |
+
+## The devices' names
+
+A device of the house is an endpoint of a node, and the house names it: `Rename(node, endpoint,
+name)` keeps the name in `names.txt` in the bundle's directory (`src/names.rs`; a line per device:
+the node id in hex, the endpoint, the name), and every `MatterDevices` carries it in
+`MatterEndpoint.name`. The device itself is not told: Matter's own label (Basic Information's
+NodeLabel) is one per node, and a node with four endpoints is four devices here. Other Matter
+controllers keep their names the same way, in their own data.
+
+A name is at most 32 bytes of UTF-8 (the length of a NodeLabel), without control characters, runs
+of spaces as one; an empty name takes the name away, and the screens show their own word again.
+`Rename` answers "no such device" for an endpoint the last poll did not read. The devices go out
+again at once with the new name, without waiting for the next poll.
 
 ## How it is built
 

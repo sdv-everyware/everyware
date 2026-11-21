@@ -689,6 +689,7 @@ async fn call_matter(screen: Arc<Screen>, matter: Option<Arc<MatterClient>>, com
         Some(MatterCmd::SetSetpoint(r)) => ("setpoint", r.node_id, r.endpoint),
         Some(MatterCmd::SetSystemMode(r)) => ("system-mode", r.node_id, r.endpoint),
         Some(MatterCmd::SetFanMode(r)) => ("fan-mode", r.node_id, r.endpoint),
+        Some(MatterCmd::Rename(r)) => ("rename", r.node_id, r.endpoint),
         Some(_) | None => return,
     };
     let fail = |error: &str| {
@@ -708,6 +709,7 @@ async fn call_matter(screen: Arc<Screen>, matter: Option<Arc<MatterClient>>, com
         Some(MatterCmd::SetSetpoint(r)) => matter.SetSetpoint(&r).await,
         Some(MatterCmd::SetSystemMode(r)) => matter.SetSystemMode(&r).await,
         Some(MatterCmd::SetFanMode(r)) => matter.SetFanMode(&r).await,
+        Some(MatterCmd::Rename(r)) => matter.Rename(&r).await,
         Some(_) | None => return,
     };
     let result = match answer {

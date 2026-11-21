@@ -47,3 +47,13 @@ rust_ffi_shared {
         },
     },
 }
+
+// the store of the devices' names (src/names.rs): its tests need neither SDV nor a device
+rust_test_host {
+    name: "everyware_matter_names_test",
+    crate_root: "src/names.rs",
+    srcs: ["src/names.rs"],
+    test_options: {
+        unit_test: true,
+    },
+}
