@@ -132,7 +132,7 @@ A bundle sends information; how it looks is the app's. The UI library knows neit
 flowchart LR
     O["Open-Meteo<br/>HTTPS JSON"]
     C["the bundles<br/>fetch + parse, publish<br/>Weather { code, temperatures, 24 hours }"]
-    L["dashboard bundle<br/>pushes to the app<br/>(house_link.rs, 127.0.0.1:7100)"]
+    L["dashboard bundle<br/>pushes to the app<br/>(IScreenLink over binder, screen_binder.rs)"]
     A["action Weather(w)<br/>state.weather"]
     P["the app's weather.rs + presenter<br/>code -> picture, code -> words,<br/>hours -> bar levels and accents"]
     H["harry<br/>#weather/icon: a variant of the app's own #smarthome-weather<br/>#weather/chart: the library's #bar-chart, 24 bar meters"]

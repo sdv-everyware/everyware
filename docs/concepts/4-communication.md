@@ -102,17 +102,18 @@ Only bundles talk to the internet; the screen never does.
 
 ```mermaid
 flowchart LR
-    UI["harry process<br/>no network access, no SDV client:<br/>a gRPC server on 127.0.0.1"]
-    D["DashboardServiceBundle<br/>the screen's bridge: subscribes,<br/>pushes over loopback, heartbeat"]
+    UI["harry process<br/>no network access, no SDV client:<br/>a binder service (IScreenLink)"]
+    D["DashboardServiceBundle<br/>the screen's bridge: subscribes,<br/>calls the screen over binder"]
     W["WeatherServiceBundle<br/>HTTPS client, own process,<br/>own SELinux domain and policy"]
     NET["internet: weather API"]
     W -- "HTTPS every 10 minutes" --> NET
-    W -- "topic: weather" --> D -- "gRPC push" --> UI
+    W -- "topic: weather" --> D -- "binder call" --> UI
 ```
 
 The harry process cannot subscribe itself: the middleware client exists only inside a bundle
-the lifecycle agent started. The bridge bundle subscribes for it and pushes every update over a
-local connection, as HAR's own `HarSdvServiceBundle` does for `harry-app`
+the lifecycle agent started. The bridge bundle subscribes for it and pushes every update over
+binder (`interfaces/screen`: the screen takes a call only from this bundle). HAR's own
+`HarSdvServiceBundle` does the same for `harry-app` over a local gRPC connection
 (`packages/services/display_safety/utils/smarthome-app/docs/harry-app-anatomy.md`).
 
 | Why in a bundle | |

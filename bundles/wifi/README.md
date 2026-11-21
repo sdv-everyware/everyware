@@ -23,8 +23,8 @@ flowchart LR
     end
     CHIP["WCN3990<br/>ath10k_snoc"]
 
-    SHEET -- "gRPC 127.0.0.1:7100<br/>WifiCommands stream" --> BRIDGE
-    BRIDGE -- "PublishWifiNetworks / State / Result" --> SHEET
+    SHEET -- "binder: ICommandSink<br/>onWifiCommand" --> BRIDGE
+    BRIDGE -- "binder: IScreenLink<br/>publishWifiNetworks / State / Result" --> SHEET
     BRIDGE == "SDV RPC WifiService, TLS<br/>Scan · Connect · Forget · Disconnect" ==> RPC
     RPC -- "Request + oneshot" --> SES
     SES -- "answer" --> RPC
@@ -38,7 +38,7 @@ flowchart LR
 |---|---|---|
 | thick | SDV RPC: a command and its answer (`catalog/wifi_service.proto`) | the authz policies: `server` here, `client` in the bridge |
 | dotted | SDV pub/sub: what the bundle sees, for any subscriber (`catalog/wifi.proto`) | `publisher` here, `subscriber` in the bridge |
-| thin | local links: gRPC on loopback to the screen, the supplicant's control socket, the driver | SELinux (the abstract socket has no file permission) |
+| thin | local links: binder to the screen, the supplicant's control socket, the driver | SELinux (the abstract socket has no file permission) |
 
 Topics and messages: `catalog/wifi.proto`; the service: `catalog/wifi_service.proto`; who
 offers and who calls: `catalog/everyware.vsidl` (`server { service: "WifiService" channel:
@@ -172,9 +172,9 @@ within 60 s, or at once with Rescan.
   `DashboardServiceBundle` is its client (their authorization policies). A bundle without the
   `client` entry cannot call it. The calls between the two bundles go over SDV's RPC transport
   with TLS (certificates from the lifecycle manager).
-- **The password.** It travels screen → gRPC on 127.0.0.1 → bridge → `WifiService.Connect`
+- **The password.** It travels screen → binder (`ICommandSink`) → bridge → `WifiService.Connect`
   (TLS) → bundle → supplicant, inside one machine, over channels that SELinux and the SDV
-  authorization policy gate; the loopback hop is clear text. No log line carries it. It is stored by the supplicant only (`SAVE_CONFIG` into
+  authorization policy gate; the screen takes calls only from the bridge. No log line carries it. It is stored by the supplicant only (`SAVE_CONFIG` into
   `/data/vendor/wifi/wpa_supplicant.conf`, `wifi:wifi`), never by the bundle or the screen,
   and the state topic carries no password. A password typed on the screen is cleared from the
   sheet when it closes.
