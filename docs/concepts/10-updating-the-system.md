@@ -87,8 +87,9 @@ A service bundle update needs its APEX built `updatable: true` with a version th
 every release, signed with the product's key. The image the device runs decides which keys are
 accepted.
 
-`scripts/deploy-bundle-rb3.sh` is not an update: it writes an APEX over the one in the image
-(remount) for development, without the Update Manager's steps or a rollback.
+`scripts/deploy-bundle.sh` (`--target rb3` or `--target cf`) is not an update: it writes an APEX
+over the one in the image (remount) for development, without the Update Manager's steps or a
+rollback.
 
 ## Not for updates: apexd's rebootless install
 

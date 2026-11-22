@@ -132,16 +132,18 @@ with fewer rules, and the label in `file_contexts`.
 Three processes show in zones of the panel: each a Wayland client of the panel's socket
 `har-display` in its runtime directory `/data/vendor/everyware/run` (0750 root:oem_2900, the
 socket root's alone), so each runs as root. init starts them when the panel runs
-(`on property:init.svc.smarthome=running`). The RB3 boots with `androidboot.init_rc`, so init reads
-only the root init and its imports: device-rb3's `init.sdv_media.rc` imports the directory
+(`on property:init.svc.smarthome=running`). Both the RB3 and Cuttlefish boot with
+`androidboot.init_rc`, so init reads only the root init and its imports: `device-rb3`'s
+`init.sdv_media.rc` and `device-cf`'s `init.sdv_media_everyware_cf.rc` import the directory
 `/vendor/etc/init/everyware`, where the camera's and the game's services are installed; the
-browser has a root init of its own (`init.sdv_media.browser.rc`). The domains are device-rb3's
-(`sepolicy/vendor`); the panel's side of each is in its `vendor_harplatform.te`.
+browser has a root init of its own (`init.sdv_media.browser.rc` on RB3,
+`init.sdv_media_everyware_cf.browser.rc` on Cuttlefish). Each board product defines the domains
+in its `sepolicy/vendor` and the panel's side in its `vendor_harplatform.te`.
 
 | Process | Init service | Starts | SELinux domain | May |
 |---|---|---|---|---|
 | the browser (`scripts/everyware-browser.sh`: Cog in a Debian root) | `everyware_browser` (`product/everyware_browser.rc`), oneshot: the script keeps its children | with `EVERYWARE_EXPERIMENTAL_BROWSER=true` (everyware.mk) | `everyware_browser` (permissive while its rules are collected) | `/proc/net/unix`; the rest as the denials show |
-| the camera (camera-app: a USB webcam in the camera tile and the full view) | `everyware_camera` (camera-app's `product/everyware_camera.rc`), root, group camera, started again when it ends | always on the RB3 (camera-app's `product/camera.mk`) | `everyware_camera` | `/dev/video*` and sysfs to find the camera; the GPU's render node; its design in `/vendor/etc/camera-app`; the panel's socket; its control socket `har-camera` (`everyware_camera_socket`), which the panel connects to; `setsched` for its decode thread; no network |
+| the camera (camera-app: a USB webcam in the camera tile and the full view) | `everyware_camera` (camera-app's `product/everyware_camera.rc`), root, group camera, started again when it ends | always on RB3 and Cuttlefish (camera-app's `product/camera.mk`) | `everyware_camera` | `/dev/video*` and sysfs to find the camera; the GPU's render node; its design in `/vendor/etc/camera-app`; the panel's socket; its control socket `har-camera` (`everyware_camera_socket`), which the panel connects to; `setsched` for its decode thread; no network |
 | the game (doom-app: DOOM in a dialog) | `everyware_game` (doom-app's `product/everyware_game.rc`), root, started again when it ends | with `EVERYWARE_GAME=true` (doom-app's `product/doom.mk`) | `everyware_game` | the panel's socket (its picture in wl_shm memory the panel maps); its keys' FIFO `har-game-keys` (`everyware_game_fifo`), which the panel writes; the WAD in `/vendor/etc/doom`; its data in `/data/vendor/everyware/doom` (`everyware_game_data_file`); no GPU, no network |
 
 The camera's and the game's binaries are on the vendor partition (`/vendor/bin`), where the
@@ -165,25 +167,26 @@ can neither allow nor silence them; the camera does not need either directory.
 
 A product's update goes through the SDV Update Manager, with a rollback when the new version
 does not start: [10. Updating the system](10-updating-the-system.md). The table is the
-development's way.
+development's way (`--target rb3` by default, `--target cf` for Cuttlefish; `-rb3.sh` wrappers
+remain for RB3).
 
 | What | How | Reboot |
 |---|---|---|
-| a new version, installed for development | `scripts/deploy-bundle-rb3.sh smarthome` (the APEX over the image's in `/vendor/apex`, remount) | yes: apexd mounts APEXes at boot |
+| a new version, installed for development | `scripts/deploy-bundle.sh [--target cf] smarthome` (the APEX over the image's in `/vendor/apex`, remount) | yes: apexd mounts APEXes at boot |
 | a new design only | `adb push smarthome.dcf /data/vendor/everyware/smarthome/` and `adb shell restart smarthome` | no |
 | back to the APEX's design | `adb shell rm /data/vendor/everyware/smarthome/smarthome.dcf` and `restart smarthome` | no |
-| a development build | `scripts/run-smarthome-rb3.sh` (stops the service, runs the build from `/data/local/tmp`) | no |
-| back to the installed panel | `scripts/run-smarthome-rb3.sh stop` (`start smarthome`) | no |
+| a development build | `scripts/run-smarthome.sh [--target cf]` (stops the service, runs the build from `/data/local/tmp`) | no |
+| back to the installed panel | `scripts/run-smarthome.sh [--target cf] stop` (`start smarthome`) | no |
 
 ```mermaid
 flowchart LR
     subgraph dev["development"]
-        RUN["run-smarthome-rb3.sh"] -- "stop smarthome" --> X["/data/local/tmp/smarthome_app"]
+        RUN["run-smarthome.sh"] -- "stop smarthome" --> X["/data/local/tmp/smarthome_app"]
     end
     subgraph installed["installed"]
-        DEP["deploy-bundle-rb3.sh smarthome"] -- "/vendor/apex + reboot" --> SVC["service smarthome"]
+        DEP["deploy-bundle.sh smarthome"] -- "/vendor/apex + reboot" --> SVC["service smarthome"]
     end
-    X -- "run-smarthome-rb3.sh stop" --> SVC
+    X -- "run-smarthome.sh stop" --> SVC
 ```
 
 ## Checking it

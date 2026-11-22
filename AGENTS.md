@@ -18,6 +18,7 @@ Read this file, then the `AGENTS.md` nearest to your change, then the skill for 
 | `vendor/sdv-everyware/third_party/rust` | vendored Rust crates (rs-matter) | |
 | `vendor/sdv-everyware/dnsproxyd` | the DNS proxy for the bundles | |
 | `device/rb3/sdv_media_db845c` | the product of the reference board (Qualcomm RB3) | its README |
+| `device/cf-everyware/sdv_media_everyware_cf` | the product for the Cuttlefish emulator (development without hardware) | its README |
 
 Who owns what, in one line each: a **bundle** sends information; an **app** decides what it
 looks like (composition, content, its own pictures); the **UI library** has components that

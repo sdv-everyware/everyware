@@ -160,9 +160,9 @@ network, the product makefile); everything above it is the same.
 
 | Target | Role | State |
 |---|---|---|
-| Qualcomm Robotics RB3 (DB845c) | the reference board: every change is measured here first | boots, draws, touch; the bundles are being added to the product |
-| Cuttlefish (the Android emulator) | development without hardware, continuous builds | planned, [issue #18](https://github.com/sdv-everyware/everyware/issues/18) |
-| Raspberry Pi | the cheap board on the wall | planned, [issue #46](https://github.com/sdv-everyware/everyware/issues/46) |
+| Qualcomm Robotics RB3 (DB845c) | the reference board: every change is measured here first | boots, draws, touch, bundles and panel running |
+| Cuttlefish (the Android emulator) | development without hardware, continuous builds | boots, draws, touch, live bundles and panel running ([`device-cf`](https://github.com/sdv-everyware/device-cf)) |
+| Raspberry Pi | the cheap board on the wall | work in progress, [issue #46](https://github.com/sdv-everyware/everyware/issues/46) |
 
 ## The project
 
@@ -178,6 +178,7 @@ manifest and the two forks in the tree (Google's harry, Linaro's board support) 
 | [`template-app`](https://github.com/sdv-everyware/template-app), [`smarthome-app`](https://github.com/sdv-everyware/smarthome-app), [`tv-app`](https://github.com/sdv-everyware/tv-app), [`hub-app`](https://github.com/sdv-everyware/hub-app), [`pairs-app`](https://github.com/sdv-everyware/pairs-app) | `packages/services/display_safety/utils/<name>` | the apps on harry; `template-app` is the template of a new app (`ui-lib`'s `new-app.sh` copies it); `smarthome-app` is the smart home panel |
 | [`super-harry`](https://github.com/sdv-everyware/super-harry) | `packages/services/display_safety` | the same harry as AOSP, only faster, touchier and friendlier with Wayland |
 | [`device-rb3`](https://github.com/sdv-everyware/device-rb3) | `device/rb3/sdv_media_db845c` | the product of the reference board: SDV Media's core, the display, the network, the bundles. A new target is a repository like this one |
+| [`device-cf`](https://github.com/sdv-everyware/device-cf) | `device/cf-everyware/sdv_media_everyware_cf` | the product for the Cuttlefish emulator (`sdv_media_everyware_cf`): the same bundles and panel in a VM without hardware |
 | [`dragonboard`](https://github.com/sdv-everyware/dragonboard) | `device/linaro/dragonboard` | Linaro's support for the reference board, with one policy change |
 | [`dnsproxyd`](https://github.com/sdv-everyware/dnsproxyd) | `vendor/sdv-everyware/dnsproxyd` | name resolution for a device without netd |
 | [`third_party-rust`](https://github.com/sdv-everyware/third_party-rust), [`third_party-chrony`](https://github.com/sdv-everyware/third_party-chrony) | `vendor/sdv-everyware/third_party/{rust,chrony}` | the Rust crates the tree lacks (rs-matter, tokio-openssl), chrony |
@@ -193,7 +194,7 @@ manifest and the two forks in the tree (Google's harry, Linaro's board support) 
 | `product/` | `everyware.mk` and the SELinux contexts of the bundles: what a device product adds to carry them |
 | `design/figma/` | the kiwi tools: a Figma file written and read without Figma, the roundtrip, `fig2json` |
 | `tools/` | `dcf` (a `.dcf` from Figma or from a `.fig`, the node by node comparison), `matter-generator` (a virtual Matter device on the laptop), `boot-time` (power on to the first frame, measured), `fbgrab` (dumps the active DRM framebuffer to raw RGBA for boards without SurfaceFlinger) |
-| `scripts/` | the design path (`fetch-dcf.sh`, `fig-to-dcf.sh`), the board (`deploy-bundle-rb3.sh`, `run-smarthome-rb3.sh`, `calendar-client.sh`), the process (`feature.sh`, the git hooks) |
+| `scripts/` | the design path (`fetch-dcf.sh`, `fig-to-dcf.sh`), the target (`deploy-bundle.sh`, `run-smarthome.sh`, `calendar-client.sh`), the process (`feature.sh`, the git hooks) |
 | `skills/` | step by step instructions for an agent: a service bundle, a Figma design, the review of a branch (the UI library and the apps have theirs in `ui-lib/skills`) |
 | `pages/` | static web pages: `oauth/`, the relay page of the calendar link, and its test |
 | `docs/` | the concepts, the solution, the decisions and the status |
@@ -201,7 +202,7 @@ manifest and the two forks in the tree (Google's harry, Linaro's board support) 
 ## Get started
 
 You need a Linux machine with the [AOSP build requirements](https://source.android.com/docs/setup/start/requirements)
-and about 400 GB of disk. The tree is the same for every target; the last two lines pick one.
+and about 400 GB of disk. The tree is the same for every target; pick one target block below.
 
 ```bash
 # the public AOSP tree at the release tag, plus the project's repositories; the sync also
@@ -210,11 +211,14 @@ repo init -u https://android.googlesource.com/platform/manifest -b android-17.0.
 git clone -b everyware-17.0.0_r1 https://github.com/sdv-everyware/manifest .repo/local_manifests
 repo sync -c -j8
 
-# the reference board (Qualcomm RB3): Linaro's prebuilt vendor package, once
-device/linaro/dragonboard/fetch-vendor-package.sh
+# option A: Cuttlefish emulator (no board needed; needs cuttlefish-base and cuttlefish-user)
+source device/cf-everyware/sdv_media_everyware_cf/tools/env.sh
+m
+device/cf-everyware/sdv_media_everyware_cf/tools/run.sh start
 
-# the image
-source build/envsetup.sh && lunch sdv_media_db845c-trunk_staging-userdebug
+# option B: the reference board (Qualcomm RB3): Linaro's prebuilt vendor package, once
+device/linaro/dragonboard/fetch-vendor-package.sh
+source device/rb3/sdv_media_db845c/tools/env.sh
 m
 ```
 
@@ -227,16 +231,16 @@ library: `vendor/sdv-everyware/ui-lib/scripts/new-app.sh <name>` copies
 
 ## Status and roadmap
 
-Built from AOSP `android-17.0.0_r1`; the reference board boots the image, harry
-draws with touch, the three apps run, the five bundles build, the design path works without Figma. The A/B
-update path is in the image and running; our APEXes are not updatable on their own yet and the
-image is signed with test keys. Details in [`docs/project/status.md`](docs/project/status.md) and
+Built from AOSP `android-17.0.0_r1`; both the reference board (RB3) and the Cuttlefish emulator
+boot the image, harry draws with touch, the service bundles and smart home panel run, and the
+design path works without Figma. The A/B update path is in the image and running; our APEXes are
+not updatable on their own yet and the image is signed with test keys. Details in
+[`docs/project/status.md`](docs/project/status.md) and
 [10. Updating the system](docs/concepts/10-updating-the-system.md).
 
 What comes next is tracked as [issues](https://github.com/sdv-everyware/everyware/issues), each
-with the problem it solves and the alternatives considered: the bundles in the product, the smart home panel on AOSP 17, the emulator
-and the Raspberry Pi as targets, a browser (experimental) and a camera feed in a zone of the screen, SELinux
-enforcing, device discovery.
+with the problem it solves and the alternatives considered: the Raspberry Pi as a target, the
+experimental browser's root image, SELinux enforcing, device discovery, and standalone APEX updates.
 
 ## Learn more
 

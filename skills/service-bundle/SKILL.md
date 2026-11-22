@@ -1,6 +1,6 @@
 ---
 name: service-bundle
-description: Add an SDV service bundle to EveryWare (a publisher, a subscriber, an RPC server or client, a bridge to the screen, a bundle that owns a device such as Wi-Fi) the way Android Studio for Platform does it - a message in the catalog, the bundle in everyware.vsidl, vsidlc generates the descriptors, the bundle crate in the generated shape, an APEX per bundle with its authz policy, deploy to the RB3, verify by logs. Use when the user asks to add a bundle, a topic, a publisher or subscriber, to move logic out of the harry app into a bundle, or when a bundle does not load or does not get its topic.
+description: Add an SDV service bundle to EveryWare (a publisher, a subscriber, an RPC server or client, a bridge to the screen, a bundle that owns a device such as Wi-Fi) the way Android Studio for Platform does it - a message in the catalog, the bundle in everyware.vsidl, vsidlc generates the descriptors, the bundle crate in the generated shape, an APEX per bundle with its authz policy, deploy to the RB3 or Cuttlefish, verify by logs. Use when the user asks to add a bundle, a topic, a publisher or subscriber, to move logic out of the harry app into a bundle, or when a bundle does not load or does not get its topic.
 ---
 
 # Add a service bundle
@@ -17,12 +17,14 @@ catalog/everyware.vsidl the bundles: who publishes / subscribes what    ├─�
 bundles/<name>/src/lib.rs   the bundle, in the shape vsidlc generates   ◄┘     PublisherDescriptors, SubscriberDescriptors
 bundles/<name>/apex/        APEX: manifest, orchestration, authz policy
 product/everyware.mk        PRODUCT_PACKAGES += com.everyware.<name>
-scripts/deploy-bundle-rb3.sh <name>   push the APEX, reboot, show the bundle's log
+scripts/deploy-bundle.sh [--target cf] <name>   push the APEX, reboot, show the bundle's log
 ```
 
-Paths are relative to `vendor/sdv-everyware/everyware`; product
-`sdv_media_db845c` in `out_rb3` (`source device/rb3/sdv_media_db845c/tools/env.sh`, in bash). Read
-`traps.md` before step 3.
+Paths are relative to `vendor/sdv-everyware/everyware`; targets are RB3 (`sdv_media_db845c` in
+`out_rb3`, `source device/rb3/sdv_media_db845c/tools/env.sh`) and Cuttlefish
+(`sdv_media_everyware_cf` in `cuttlefish_out`,
+`source device/cf-everyware/sdv_media_everyware_cf/tools/env.sh`), in bash. Read `traps.md`
+before step 3.
 
 Official guides: [Create and execute SDV service bundles](https://source.android.com/docs/automotive/sdv/workstreams/core/service-bundle-development)
 (vsidl, `vsidlc`, `PRODUCT_PACKAGES`, run on Cuttlefish) and
@@ -172,7 +174,8 @@ reconnect: `bundles/dashboard`. Nothing in a bundle draws or knows the Figma nam
   `untrusted_service_bundle` unless `/product/etc/service_bundle_contexts` maps
   `<package>.<Bundle>` to a domain (`product/service_bundle_contexts`, `prebuilt_etc`
   `service_bundle_contexts` in `product/everyware.mk`). The domain lives in
-  `device/rb3/sdv_media_db845c/sepolicy/system_ext/{public,private}/<name>.te`
+  `device/rb3/sdv_media_db845c/sepolicy/system_ext/{public,private}/<name>.te` and
+  `device/cf-everyware/sdv_media_everyware_cf/sepolicy/system_ext/{public,private}/<name>.te`
   (`service_bundle_domain(<name>)` + what it may do more); the vendor side of a rule (a vendor
   type such as `net_bringup`) goes to `sepolicy/vendor/<name>.te`, because system_ext policy
   cannot name vendor types.
@@ -212,7 +215,8 @@ Add `com.everyware.<name>` to `product/everyware.mk`.
 
 ```bash
 m com.everyware.<name>                               # the APEX (and the bundle library)
-./vendor/sdv-everyware/everyware/scripts/deploy-bundle-rb3.sh <name> [<name>...]
+./vendor/sdv-everyware/everyware/scripts/deploy-bundle.sh <name> [<name>...]              # RB3
+./vendor/sdv-everyware/everyware/scripts/deploy-bundle.sh --target cf <name> [<name>...]  # Cuttlefish
 ```
 
 The script pushes the APEX to `/product/apex` (the board's copy is kept in
