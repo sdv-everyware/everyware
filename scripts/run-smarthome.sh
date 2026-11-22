@@ -10,12 +10,13 @@
 #   4. run with the APEX libs, log.tag INFO, and touch mapped to the display mode
 #
 # Usage:
-#   ./vendor/sdv-everyware/everyware/scripts/run-smarthome.sh                   # deploy + run on RB3
-#   ./vendor/sdv-everyware/everyware/scripts/run-smarthome.sh --target cf       # deploy + run on Cuttlefish
+#   ./vendor/sdv-everyware/everyware/scripts/run-smarthome.sh                   # deploy + run on the connected device
+#   ./vendor/sdv-everyware/everyware/scripts/run-smarthome.sh --target cf       # the same, the target named
 #   ./vendor/sdv-everyware/everyware/scripts/run-smarthome.sh --target cf all   # build + deploy + run
 #   ./vendor/sdv-everyware/everyware/scripts/run-smarthome.sh --target cf stop  # restore installed panel
 #
-# Env: TARGET (rb3 or cf; default rb3), SERIAL (default 6aeccbe4 on rb3; auto-detected
+# Env: TARGET (rb3 or cf; default: what the connected device says it is, ro.product.device),
+#      SERIAL (default: the one device adb sees; with a target named, 6aeccbe4 on rb3 and
 #      127.0.0.1:<port> or 0.0.0.0:<port> on cf), CF_INSTANCE (default 7, port 6520+N-1),
 #      TARGET_OUT_DIR (override target out dir; defaults to out_rb3 or cuttlefish_out),
 #      TOUCH_SIZE=WxH (default: the first display mode),
@@ -24,7 +25,7 @@ set -e
 TREE="$(cd "$(dirname "$0")/../../../.." && pwd)"
 APP="$TREE/packages/services/display_safety/utils/smarthome-app"
 
-TARGET="${TARGET:-rb3}"
+TARGET="${TARGET:-}"
 OUT_OVERRIDE="${TARGET_OUT_DIR:-}"
 MODE=""
 while [ $# -gt 0 ]; do
@@ -76,6 +77,35 @@ resolve_cf_serial() {
     echo "127.0.0.1:$port"
   fi
 }
+
+# No target named: the device says which product it is (ro.product.device). The device is the
+# one adb sees, or SERIAL (ANDROID_SERIAL) when several are connected.
+detect_target() {
+  local serial="${SERIAL:-${ANDROID_SERIAL:-}}" s id seen="" count=0
+  if [ -z "$serial" ]; then
+    for s in $(adb devices 2>/dev/null | awk 'NR > 1 && $2 == "device" { print $1 }'); do
+      # one VM can be listed under two addresses (127.0.0.1 and 0.0.0.0): the same serial number
+      id=$(adb -s "$s" shell getprop ro.serialno 2>/dev/null | tr -d '\r')
+      id="${id:-$s}"
+      case " $seen " in *" $id "*) continue ;; esac
+      seen="$seen $id"
+      count=$((count + 1))
+      [ -n "$serial" ] || serial="$s"
+    done
+    [ "$count" -ge 1 ] || { echo "!! no device: connect one, or name the target (--target rb3|cf)" >&2; exit 1; }
+    [ "$count" -eq 1 ] || { echo "!! $count devices: set SERIAL, or name the target (--target rb3|cf)" >&2; exit 1; }
+  fi
+  local product
+  product=$(adb -s "$serial" shell getprop ro.product.device 2>/dev/null | tr -d '\r')
+  case "$product" in
+    sdv_media_db845c) TARGET=rb3 ;;
+    sdv_media_everyware_cf) TARGET=cf ;;
+    *) echo "!! $serial is the product '$product', neither the RB3 nor Cuttlefish: name the target (--target rb3|cf)" >&2; exit 1 ;;
+  esac
+  SERIAL="$serial"
+  echo ">> target $TARGET: $serial is $product"
+}
+[ -n "$TARGET" ] || detect_target
 
 case "$TARGET" in
   rb3)
