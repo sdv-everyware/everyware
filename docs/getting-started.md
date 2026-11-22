@@ -182,7 +182,7 @@ adb reboot bootloader
 device/rb3/sdv_media_db845c/tools/flash.sh images
 ```
 
-After that, a changed bundle or panel build goes to the target without a full rebuild (`--target cf` for Cuttlefish, `--target rb3` or omit for RB3):
+After that, a changed bundle or panel build goes to the target without a full rebuild (the scripts ask the connected device which target it is; `--target cf` or `--target rb3` names it):
 
 ```bash
 # build the two bundles, push them to the target (root, remount, a backup), reboot

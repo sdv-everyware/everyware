@@ -167,8 +167,8 @@ can neither allow nor silence them; the camera does not need either directory.
 
 A product's update goes through the SDV Update Manager, with a rollback when the new version
 does not start: [10. Updating the system](10-updating-the-system.md). The table is the
-development's way (`--target rb3` by default, `--target cf` for Cuttlefish; `-rb3.sh` wrappers
-remain for RB3).
+development's way (the scripts ask the connected device which target it is, `--target rb3` or
+`--target cf` names it; `-rb3.sh` wrappers remain for RB3).
 
 | What | How | Reboot |
 |---|---|---|
