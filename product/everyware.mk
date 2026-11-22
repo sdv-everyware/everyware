@@ -15,7 +15,7 @@ PRODUCT_PACKAGES += \
 
 # The browser of the panel (docs/project/browser.md) is experimental and off by default: it
 # runs WPE WebKit from a Debian root, entered as root, without WebKit's sandbox, and nothing on
-# the dashboard opens a page in it. Turn it on with EVERYWARE_BROWSER=true (in the environment or
+# the dashboard opens a page in it. Turn it on with EVERYWARE_EXPERIMENTAL_BROWSER=true (in the environment or
 # the product): the image then gets the service, its script, the launcher of the Debian root, the
 # helper scripts and the bus configuration the root reads, ro.vendor.everyware.browser=true, and
 # the panel built with its browser code (the Soong variable everyware browser: the cfg browser of
@@ -23,8 +23,8 @@ PRODUCT_PACKAGES += \
 # A board that imports the browser's init file does so with the same variable (device-rb3).
 # Design: https://github.com/sdv-everyware/everyware/issues/24; security:
 # https://github.com/sdv-everyware/everyware/issues/54.
-EVERYWARE_BROWSER ?= false
-ifeq ($(EVERYWARE_BROWSER),true)
+EVERYWARE_EXPERIMENTAL_BROWSER ?= false
+ifeq ($(EVERYWARE_EXPERIMENTAL_BROWSER),true)
 $(call soong_config_set_bool,everyware,browser,true)
 PRODUCT_VENDOR_PROPERTIES += ro.vendor.everyware.browser=true
 PRODUCT_COPY_FILES += \
