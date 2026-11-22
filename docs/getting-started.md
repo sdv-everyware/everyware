@@ -76,7 +76,7 @@ Then:
   ```
 - `product/everyware.mk`: `com.everyware.<name>` in `PRODUCT_PACKAGES`.
 - If the bundle touches the system (a sysfs file, a system property), it needs its own SELinux
-  domain (`device-rb3` sepolicy) and a line in `product/service_bundle_contexts`:
+  domain (`device-rb3` and `device-cf` sepolicy) and a line in `product/service_bundle_contexts`:
   `com.everyware.<name>.<Name>ServiceBundle u:r:<name>_service_bundle:s0`. Without that line it
   runs in the default domain, which may not touch the system.
 
@@ -156,27 +156,39 @@ The screen is a Figma design driven by code.
 - `src/screen_binder.rs`: `send_led_command` and `publishLedResult`, like the Matter ones.
 - `src/presenter.rs`: `model.prefs_led = slot("#prefs/led", &prefs.led);`
 
-## Build and run on the board
+## Build and run
+
+Pick a target: Cuttlefish (no board needed) or the RB3.
 
 ```bash
+# Cuttlefish (x86_64, OUT_DIR=cuttlefish_out)
+source device/cf-everyware/sdv_media_everyware_cf/tools/env.sh
+
+# RB3 (arm64, OUT_DIR=out_rb3)
 source device/rb3/sdv_media_db845c/tools/env.sh
 ```
 
-A new bundle or a new SELinux domain needs the image first:
+A new bundle or a new SELinux domain needs a full image first:
 
 ```bash
 m
-adb reboot bootloader                                 # flash.sh needs the board in fastboot
-device/rb3/sdv_media_db845c/tools/flash.sh images     # boot, vendor_boot, super; /data stays
+
+# Cuttlefish: recreate the VM with the new image
+device/cf-everyware/sdv_media_everyware_cf/tools/run.sh rm
+device/cf-everyware/sdv_media_everyware_cf/tools/run.sh start
+
+# RB3: flash over fastboot (/data stays)
+adb reboot bootloader
+device/rb3/sdv_media_db845c/tools/flash.sh images
 ```
 
-After that, a changed bundle goes to the board without a flash:
+After that, a changed bundle or panel build goes to the target without a full rebuild (`--target cf` for Cuttlefish, `--target rb3` or omit for RB3):
 
 ```bash
-# build the two bundles, push them to the board (root, remount, a backup), reboot
-vendor/sdv-everyware/everyware/scripts/deploy-bundle-rb3.sh all led dashboard
-vendor/sdv-everyware/everyware/scripts/run-smarthome-rb3.sh all   # the app with its design
-adb logcat -s led_bundle dashboard_bundle smarthome-app
+# build the two bundles, push them to the target (root, remount, a backup), reboot
+vendor/sdv-everyware/everyware/scripts/deploy-bundle.sh --target cf all led dashboard
+vendor/sdv-everyware/everyware/scripts/run-smarthome.sh --target cf all   # the app with its design
+adb -s 127.0.0.1:6526 logcat -s led_bundle dashboard_bundle smarthome-app   # serial from `cvd fleet`
 ```
 
 ## A setting is shorter
