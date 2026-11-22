@@ -151,9 +151,9 @@ generated bundle (`libtokio`, `libtokio_util`, `libanyhow`, `libfutures`, `libfu
 true`, `min_sdk_version: "35"`, `apex_available` platform and anyapex. No `prefer_rlib`, no
 `shared_libs`, no `ld_flags`, no HAR `har_sdv_service_bundle_common`.
 
-A bundle that talks to the harry process is a gRPC **client** on 127.0.0.1 (the harry process is
-the server, `smarthome-app/src/house_link.rs`), with a heartbeat and the last values kept for a
-reconnect: `bundles/dashboard`. Nothing in a bundle draws or knows the Figma names.
+A bundle that talks to the harry process calls its binder service (`interfaces/screen`: the
+harry process serves `IScreenLink`, `interfaces/screen/link` or `smarthome-app/src/screen_binder.rs`),
+watches it with a death recipient and keeps the last values for its return: `bundles/dashboard`. Nothing in a bundle draws or knows the Figma names.
 
 ### The three shapes we have (read their READMEs)
 
@@ -161,7 +161,7 @@ reconnect: `bundles/dashboard`. Nothing in a bundle draws or knows the Figma nam
 |---|---|---|
 | `bundles/weather` | publisher: polls the internet, publishes a topic | `bundles/weather/README.md` |
 | `bundles/news` | publisher of two topics: a feed and a picture per item; reads pages and pictures from the internet (untrusted data, decoded in the bundle), HTTPS through `libs/https` | `bundles/news/README.md` |
-| `bundles/dashboard` | the bridge: subscribes to the topics the screen shows, pushes them over gRPC to the harry process (no SDV participant), takes the screen's commands from a gRPC server stream and calls `WifiService` for each, the answer back to the screen | `bundles/dashboard/README.md` (why a bridge at all) |
+| `bundles/dashboard` | the bridge: subscribes to the topics the screen shows, pushes them over binder to the harry process (no SDV participant), takes the screen's commands in a binder sink and calls `WifiService` for each, the answer back to the screen | `bundles/dashboard/README.md` (why a bridge at all) |
 | `bundles/wifi` | owns a device: talks to wpa_supplicant's control interface, publishes state, serves the RPC `WifiService` | `bundles/wifi/README.md` (how the supplicant is reached, the security) |
 | `bundles/calendar` | publisher for an account: links a Google account by OAuth (a setup page on the local network while there is none, a QR code on the screen), keeps the refresh token in its directory, reads an API with it | `bundles/calendar/README.md` (the link, the relay page, the security) |
 

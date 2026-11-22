@@ -9,17 +9,17 @@ calendar commands and its settings changes, comes into the sink the bundle hands
 (`ICommandSink`); the bundle calls the Wi-Fi bundle's RPC `WifiService`, the Matter bundle's
 `MatterService` or the calendar bundle's `CalendarService` for each, and the answer goes back to
 the screen (`publishWifiResult`, `publishMatterResult`, `publishCalendarResult`; a calendar
-change also shows in the agenda the calendar bundle publishes before it answers). `proto/dashboard.proto` is the gRPC link that hub, tv and pairs still
-build against; the panel does not serve it.
+change also shows in the agenda the calendar bundle publishes before it answers). The other screens (hub, tv, pairs) serve the same
+interface through the shared link (`interfaces/screen/link`); one screen serves it at a time.
 
 ```
 SDV (lifecycle, discovery, authz, topics)            harry (DRM, GPU, touch: a plain process)
-WeatherServiceBundle ─┐                                            ▲ PublishWeather, PublishWifi*,
-WifiServiceBundle ────┼─ topics ─► DashboardServiceBundle ──gRPC──┤ PublishMatterDevices,
-MatterServiceBundle ──┘                                           │ Heartbeat (1/s)
-                                                                  ▼ WifiCommands, MatterCommands
-WifiServiceBundle ◄── RPC WifiService ───┐                          (server streams)
-MatterServiceBundle ◄── RPC MatterService┴─ (answer) ──gRPC──► PublishWifiResult, PublishMatterResult
+WeatherServiceBundle ─┐                                             ▲ IScreenLink: publishWeather,
+WifiServiceBundle ────┼─ topics ─► DashboardServiceBundle ─binder──┤ publishWifi*, publishMatterDevices,
+MatterServiceBundle ──┘                                            │ publishAgenda, publishSettings
+                                                                   ▼ ICommandSink: onWifiCommand,
+WifiServiceBundle ◄── RPC WifiService ───┐                           onMatterCommand, ...
+MatterServiceBundle ◄── RPC MatterService┴─ (answer) ─binder─► publishWifiResult, publishMatterResult
                                                               smarthome_app
 ```
 
@@ -34,15 +34,14 @@ screen gets a bridge, as Google's reference does (`HarSdvServiceBundle` pushing 
 
 | | the app in SDV itself | the bridge |
 |---|---|---|
-| topics | the app as a bundle (no DRM/GPU) or as a gateway client (~500 lines of SDV client in the UI) | the app has one gRPC server and no SDV code |
-| rights | the UI process holds an authorization policy and talks to the SDV agents | only the bridge is in the policies; the UI sees what it is pushed and asks through one stream |
-| a UI restart | subscriptions and state to rebuild in the UI | the bridge keeps the last value of every topic and sends it again when the heartbeat gets through |
+| topics | the app as a bundle (no DRM/GPU) or as a gateway client (~500 lines of SDV client in the UI) | the app has one binder service and no SDV code |
+| rights | the UI process holds an authorization policy and talks to the SDV agents | only the bridge is in the policies; the UI sees what it is pushed and asks through one sink |
+| a UI restart | subscriptions and state to rebuild in the UI | the bridge keeps the last value of every topic and sends it again when the screen's service is back |
 | a new source (Matter, MQTT) | every screen subscribes on its own | one more subscription here, the screen unchanged |
-| cost | | one more process, one hop on localhost, a proto that mirrors the catalog's types |
+| cost | | one more process, one binder hop |
 
-The messages on the wire are the catalog's: `dashboard.proto` imports `weather.proto` and
-`wifi.proto`, and the bundle converts between the catalog crate and the gRPC crate by the
-wire format (`convert`), so the two cannot drift. A Matter command is the same: a call of the Matter bundle's `MatterService`
+The messages inside the calls are the catalog's (`catalog/*.proto`) as bytes, so the interface
+freezes only the envelope. A Matter command is the same: a call of the Matter bundle's `MatterService`
 (`catalog/matter_service.proto`) in a task of its own, answered when the device acknowledged
 it (up to 160 s for a pairing), "the Matter service did not answer" when the call does not get
 through. The Matter devices and commands run in a task of their own (`matter_link`): their
@@ -56,17 +55,18 @@ screen never waits for a connect that never started (decisions.md, 2026-11-06).
 ## How it is built
 
 - `src/lib.rs`: the shape `vsidlc --services` generates (`ServiceBundle`, `SdvComms`, a
-  current-thread runtime, `sdv_main`); one `handle_*_observer` per topic, `handle_heartbeat`,
-  `handle_wifi_commands` for the stream, `call_wifi` per command, `create_wifi_client` (waits
+  current-thread runtime, `sdv_main`); one `handle_*_observer` per topic, `handle_screen`
+  for the link to the screen (`src/screen.rs`), `handle_commands` for what comes into the sink, `call_wifi` per command, `create_wifi_client` (waits
   for the server's registration); `Last` holds the last value of every topic.
-- The gRPC channel reconnects on its own (grpcio, 10..500 ms backoff); every subscription
+- The screen's service is looked for once a second while it is not there; a death recipient
+  says at once when its process is gone (`src/screen.rs`). Every subscription
   waits for its publisher (`create_registration_event_stream`), so the bundles may start in
   any order.
 - Every topic is state, so every subscription is `read_on_subscribe`: it gets the
   publication's last message at once. What a bundle published before the bridge subscribed
   (at boot: the weather's and the news' last values, kept from the previous start) reaches
   the screen with its first frame instead of with the next new value.
-- `proto/dashboard.proto`, built as `libeveryware_dashboard_grpc` for both sides.
+- `interfaces/screen`: the two AIDL interfaces, and `link/`, the screen's side as a crate.
 - `apex/permissions.textproto`: subscriber of the seven topics, client of
   `com.everyware.WifiService` on the channel `wifi`, of `com.everyware.MatterService` on the
   channel `matter` and of `com.everyware.CalendarService` on the channel `calendar`.
@@ -106,11 +106,12 @@ The bridge shows the device's settings on the screen as Google's HMI sample does
 ## Security
 
 - The bridge is the only client of `WifiService`: a command reaches the Wi-Fi bundle only
-  through it, and it only takes commands from the stream the harry process serves on
-  127.0.0.1 (loopback, no TLS: same machine, the SELinux domains of the two processes and the
-  port are the boundary).
-- The app never opens a connection: it serves, the bridge calls. A compromised UI can send
-  commands down the stream it serves, nothing else; a compromised bridge is a bundle with
+  through it, and it only takes commands from the sink it handed the screen over binder.
+  The screen takes a call only from this bundle: the kernel gives the caller's pid and uid,
+  and the SDV identity agent says which service bundle that process is. A port on 127.0.0.1
+  would be open to every local process.
+- The app never looks the bundle up: it serves, the bridge calls. A compromised UI can send
+  commands into the sink it was handed, nothing else; a compromised bridge is a bundle with
   exactly its policy.
 - A password typed on the screen passes through here inside a `WifiConnect` and is not kept
   (`Last` holds no command, the log has the SSID only).
@@ -119,6 +120,6 @@ The bridge shows the device's settings on the screen as Google's HMI sample does
 
 - `adb logcat -s dashboard_bundle`: "subscribed to ...", "weather ...", "N Wi-Fi networks",
   "Wi-Fi WIFI_CONNECTED ...", "calling WifiService#wifi" once the Wi-Fi bundle is registered,
-  "taking Wi-Fi commands from the harry process" once the first command arrives,
-  `Wi-Fi connect "<ssid>": ok false "wrong password"` per answer, "the harry process is gone, keeping the last values" when the app stops.
-- Restart the app: the last values appear on the screen within a second (the heartbeat).
+  "the panel serves com.everyware.screen.IScreenLink/default" and "taking the screen's commands" once the screen is found,
+  `Wi-Fi connect "<ssid>": ok false "wrong password"` per answer, "the panel is gone, keeping the last values" when the app stops.
+- Restart the app: the last values appear on the screen within a second (the bundle looks for the screen's service once a second).

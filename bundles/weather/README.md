@@ -7,7 +7,7 @@ conditions and the next 24 hours at the house's location and publishes them on t
 through the dashboard bundle; nothing else needs a network for it.
 
 ```
-Open-Meteo ──HTTPS──► WeatherServiceBundle ──topic weather──► DashboardServiceBundle ──gRPC──► screen
+Open-Meteo ──HTTPS──► WeatherServiceBundle ──topic weather──► DashboardServiceBundle ──binder──► screen
                       (open-meteo/)    │                      (bridge)                       (harry)
                                        ▼ weather.pb, the last reading
                       /data/service_bundle_data/com.everyware.weather/WeatherServiceBundle

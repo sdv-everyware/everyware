@@ -1,0 +1,38 @@
+// The screen's side of the link to the dashboard bundle (../com/everyware/screen/*.aidl), for
+// every app that shows the house's data: the binder service, the check that the caller is the
+// dashboard bundle, the command sink and its death. An app gives its handlers (src/lib.rs,
+// `Screen`) and takes only the messages its screen shows.
+
+package {
+    default_applicable_licenses: ["Android-Apache-2.0"],
+}
+
+rust_library {
+    name: "libeveryware_screen_link",
+    crate_name: "everyware_screen_link",
+    srcs: ["src/lib.rs"],
+    rustlibs: [
+        "libbinder_rs",
+        "liblog_rust",
+        "libprotobuf",
+        // the interface, and the SDV identity agent that names the caller
+        "com.everyware.screen-V1-rust",
+        "google.sdv.identity-V2-rust",
+        // the messages inside the calls (catalog/*.proto)
+        "libeveryware_catalog",
+        // the device's settings as user_preferences reports them (IScreenLink.publishSettings)
+        "libuser_preferences_api_stable",
+    ],
+    // the apps are vendor binaries (the panel a vendor APEX)
+    vendor_available: true,
+    apex_available: [
+        "//apex_available:platform",
+        "//apex_available:anyapex",
+    ],
+    min_sdk_version: "29",
+    arch: {
+        riscv64: {
+            enabled: false,
+        },
+    },
+}
