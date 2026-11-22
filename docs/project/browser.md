@@ -2,7 +2,7 @@
 
 Experimental, and off by default: the browser runs WPE WebKit from a Debian root, entered as
 root, without WebKit's sandbox (see Security). An image has it only when it is built with
-`EVERYWARE_BROWSER=true`; without it the panel is built without its browser code. Why it
+`EVERYWARE_EXPERIMENTAL_BROWSER=true`; without it the panel is built without its browser code. Why it
 is built this way, and the options weighed: [#24](https://github.com/sdv-everyware/everyware/issues/24).
 Its open security problems: [#54](https://github.com/sdv-everyware/everyware/issues/54), points 1 and 4.
 
@@ -38,7 +38,7 @@ cog --platform=wl URL                        WPE WebKit in a Debian root, user b
 ## Turning it on
 
 ```
-export EVERYWARE_BROWSER=true   # or set it in the product's makefile
+export EVERYWARE_EXPERIMENTAL_BROWSER=true   # or set it in the product's makefile
 m
 ```
 
