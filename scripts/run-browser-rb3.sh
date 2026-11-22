@@ -1,7 +1,7 @@
 #!/bin/bash
 # run-browser-rb3.sh -- run a developer's build of the panel with a browser zone on the RB3
 # and measure it. The browser is experimental: the image must be built with
-# EVERYWARE_BROWSER=true (product/everyware.mk), and the panel with its browser code.
+# EVERYWARE_EXPERIMENTAL_BROWSER=true (product/everyware.mk), and the panel with its browser code.
 # What runs, the Debian root it needs and the modes: docs/project/browser.md.
 #
 #   run-browser-rb3.sh start [--no-zone-plane] [--zone-redraw timer|frames] [--zone-fps N] [URL]
@@ -76,7 +76,7 @@ cmd_start() {
   for _ in $(seq 20); do [ "$(A shell id -u | tr -d '\r')" = 0 ] && break; sleep 1; done
   # before the installed panel is stopped: a start that cannot work leaves the board as it is
   [ -f "$BIN" ] || { echo "!! $BIN is not built (m smarthome_app)" >&2; exit 1; }
-  [ "$(A shell getprop ro.vendor.everyware.browser | tr -d '\r')" = true ] || { echo "!! the image has no browser: build it with EVERYWARE_BROWSER=true (docs/project/browser.md)" >&2; exit 1; }
+  [ "$(A shell getprop ro.vendor.everyware.browser | tr -d '\r')" = true ] || { echo "!! the image has no browser: build it with EVERYWARE_EXPERIMENTAL_BROWSER=true (docs/project/browser.md)" >&2; exit 1; }
   A shell 'test -x /data/glibc/rootfs/usr/bin/cog' || { echo "!! no Debian root with Cog on the board (docs/project/browser.md)" >&2; exit 1; }
   # the installed browser first: its script would start Cog again
   A shell stop everyware_browser 2>/dev/null || true
