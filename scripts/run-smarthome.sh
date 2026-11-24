@@ -231,7 +231,9 @@ SERVICE=""
 if [ -n "$(A shell getprop init.svc.smarthome | tr -d '\r')" ]; then
   RUN=/data/vendor/everyware/run
   SERVICE="XDG_RUNTIME_DIR=$RUN HAR_BROWSER_FIFO=$RUN/har-browser-open HAR_BROWSER_EVENTS=$RUN/har-browser-events"
-  ZONES="--wayland-zones --zone-plane"
+  # the service's override directory: the look chosen in the settings is kept there, and
+  # without it the panel has one look
+  ZONES="--override-path /data/vendor/everyware/smarthome --wayland-zones --zone-plane"
 fi
 
 # log.tag INFO: the image has none, harry would log VERBOSE.
