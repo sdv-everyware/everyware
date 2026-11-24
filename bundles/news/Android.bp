@@ -25,7 +25,7 @@ rust_ffi_shared {
         "libsdv_status_rs",
         // the news client (bundles/news/client): Hacker News, the articles' meta tags
         "libeveryware_news_client",
-        // the last feed and its thumbnails, published at the next start (libs/bundle-store)
+        // what was read of the stories' articles, for the next start (libs/bundle-store)
         "libeveryware_bundle_store",
     ],
     proc_macros: ["libasync_trait"],

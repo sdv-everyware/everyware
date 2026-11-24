@@ -20,7 +20,7 @@
 //!
 //! | outcome | the bundle's directory | the agenda |
 //! |---|---|---|
-//! | a read | `agenda.pb` | `CALENDAR_CONNECTED` with the events |
+//! | a read | `agenda.pb` says connected, without the events | `CALENDAR_CONNECTED` with the events |
 //! | `invalid_grant`, the scope gone | `grant.json` removed | `CALENDAR_EXPIRED`, no events, the setup page again |
 //! | the client refused, the Calendar API off | `grant.json` kept (a reset secret keeps the client's id) | `CALENDAR_NO_CLIENT`, no events, until `oauth-client.json` changes |
 //! | anything else | | the last agenda stays, with `read_failed` (`failed`) once the reads have failed for `FAILED_AFTER`; its `updated` tells its age |
@@ -51,11 +51,10 @@ const MAX_GRANT_FILE: usize = 4 * 1024;
 pub const REPLACED_FILE: &str = "grants-replaced.json";
 /// Replaced grants kept aside, at most (the oldest goes first).
 const MAX_REPLACED: usize = 8;
-/// The last agenda (0600: titles, places, the account's address), published again at the next
-/// start until the first new read.
+/// The link's state as the bundle left it (0600), an agenda without events: an expired link
+/// stays expired across a restart. The events are not kept: an agenda of an earlier run is not
+/// the calendar now, and the next start publishes "not read yet" until its first read.
 pub const LAST_AGENDA: &str = "agenda.pb";
-/// Older than this the last agenda's events are not shown at a start.
-pub const LAST_MAX_AGE: Duration = Duration::from_secs(24 * 3600);
 /// An access token is renewed when it has less than this left.
 pub const REFRESH_MARGIN: Duration = Duration::from_secs(120);
 /// A read every this long while the reads succeed: a new event is on the screen within a minute.
@@ -71,9 +70,6 @@ pub const RETRY_MAX: Duration = Duration::from_secs(300);
 /// waits between them counted (the fifth failure in a row): at a start the bundle runs before
 /// the network is up, and its first reads fail for a few seconds.
 pub const FAILED_AFTER: Duration = Duration::from_secs(30);
-/// An agenda that did not change (a read every minute changes only `updated`) is written again
-/// at most this often, to spare the flash; a changed one at once.
-pub const KEEP_EVERY: Duration = Duration::from_secs(3600);
 /// The setup URL for the development flow, in the bundle's directory (0600): the bundle's debug
 /// lines do not reach logcat, and the URL holds a one-time token. Gone once the setup ends.
 pub const SETUP_URL_FILE: &str = "setup-url";
@@ -356,14 +352,14 @@ pub struct Link {
     file: Option<Vec<u8>>,
     /// The client file Google refused: no client while the file is the same.
     refused: Option<Vec<u8>>,
-    /// The connected agenda kept last, without its `updated`, and when.
-    kept: Option<(Agenda, Instant)>,
+    /// The link's state as this run wrote it to `LAST_AGENDA` last.
+    written: Option<CalendarLink>,
 }
 
 impl Link {
     /// The link's files in `store`.
     pub fn new(store: Arc<Store>) -> Link {
-        Link { store, file: None, refused: None, kept: None }
+        Link { store, file: None, refused: None, written: None }
     }
 
     /// The bundle's directory.
@@ -377,11 +373,9 @@ impl Link {
     }
 
     /// What the last start left: whether the link had expired (however long ago: no account was
-    /// linked since), and its agenda when it was connected and the agenda is a day old at most.
-    pub fn last(&self) -> (bool, Option<Agenda>) {
-        let expired = self.store.load::<Agenda>(LAST_AGENDA, Duration::MAX).is_some_and(|a| link_of(&a) == CalendarLink::CALENDAR_EXPIRED);
-        let kept = self.store.load::<Agenda>(LAST_AGENDA, LAST_MAX_AGE).filter(|a| link_of(a) == CalendarLink::CALENDAR_CONNECTED);
-        (expired, kept)
+    /// linked since).
+    pub fn expired(&self) -> bool {
+        self.store.load::<Agenda>(LAST_AGENDA, Duration::MAX).is_some_and(|a| link_of(&a) == CalendarLink::CALENDAR_EXPIRED)
     }
 
     /// The owner's client, or why there is none: no file, a file that is not a usable client, or
@@ -414,10 +408,10 @@ impl Link {
         not_read(grant)
     }
 
-    /// A read at `unix` (`now` on the monotonic clock) with the change of the events granted or
-    /// not (`can_change`): the connected agenda, kept when it changed or when the last one was
-    /// kept `KEEP_EVERY` ago. Without the change no event offers one.
-    pub fn connected(&mut self, read: Read, can_change: bool, unix: i64, now: Instant) -> Agenda {
+    /// A read at `unix` with the change of the events granted or not (`can_change`): the
+    /// connected agenda. Without the change no event offers one. The link's file says connected
+    /// from the first read on; the events stay in memory.
+    pub fn connected(&mut self, read: Read, can_change: bool, unix: i64) -> Agenda {
         let mut agenda = agenda_of(CalendarLink::CALENDAR_CONNECTED);
         agenda.calendar = read.calendar;
         agenda.events = read.events;
@@ -427,13 +421,8 @@ impl Link {
                 (event.can_respond, event.can_delete) = (false, false);
             }
         }
-        let content = agenda.clone();
         agenda.updated = unix;
-        let same = self.kept.as_ref().is_some_and(|(kept, at)| *kept == content && now.saturating_duration_since(*at) < KEEP_EVERY);
-        if !same {
-            self.keep(&agenda);
-            self.kept = Some((content, now));
-        }
+        self.keep(CalendarLink::CALENDAR_CONNECTED);
         agenda
     }
 
@@ -449,10 +438,8 @@ impl Link {
     /// the events with it; not connected, kept (a restart shows the setup page, not old events).
     pub fn disconnected(&mut self) -> Agenda {
         self.forget_grant();
-        let agenda = agenda_of(CalendarLink::CALENDAR_NOT_CONNECTED);
-        self.keep(&agenda);
-        self.kept = None;
-        agenda
+        self.keep(CalendarLink::CALENDAR_NOT_CONNECTED);
+        agenda_of(CalendarLink::CALENDAR_NOT_CONNECTED)
     }
 
     /// The grants of OAuth clients the owner replaced, to be ended at Google: a kept grant of
@@ -491,28 +478,45 @@ impl Link {
     /// stays expired across restarts until an account is linked).
     pub fn revoked(&mut self) -> Agenda {
         self.forget_grant();
-        let agenda = agenda_of(CalendarLink::CALENDAR_EXPIRED);
-        self.keep(&agenda);
-        self.kept = None;
-        agenda
+        self.keep(CalendarLink::CALENDAR_EXPIRED);
+        agenda_of(CalendarLink::CALENDAR_EXPIRED)
     }
 
     /// Google refused the client (or its project's Calendar API is off): no client until the file
     /// changes, and the events dropped (the screen must not show them as current). The grant
-    /// stays: a client whose secret was reset keeps its id and its grants.
+    /// stays: a client whose secret was reset keeps its id and its grants. The link's file stays
+    /// as it is: a link that had expired is still expired once there is a client again.
     pub fn refused(&mut self) -> Agenda {
         self.refused = self.file.clone();
-        let agenda = agenda_of(CalendarLink::CALENDAR_NO_CLIENT);
-        self.keep(&agenda);
-        self.kept = None;
-        agenda
+        agenda_of(CalendarLink::CALENDAR_NO_CLIENT)
     }
 
-    /// `agenda` kept for the next start, readable by the bundle only.
-    fn keep(&self, agenda: &Agenda) {
-        let kept = agenda.write_to_bytes().map_err(std::io::Error::other).and_then(|bytes| self.store.save_private(LAST_AGENDA, &bytes));
-        if let Err(err) = kept {
-            log::warn!("the agenda not kept: {err}");
+    /// At a start: a file of an earlier version holds the last agenda's events (titles, places,
+    /// the account's address). Only the link's state stays; a file that cannot be written again
+    /// is removed.
+    pub fn forget_events(&self) {
+        let Some(kept) = self.store.load::<Agenda>(LAST_AGENDA, Duration::MAX) else { return };
+        let state = agenda_of(link_of(&kept));
+        if kept == state {
+            return;
+        }
+        let written = state.write_to_bytes().map_err(std::io::Error::other).and_then(|bytes| self.store.save_private(LAST_AGENDA, &bytes));
+        if let Err(err) = written.or_else(|_| self.store.remove(LAST_AGENDA)) {
+            log::error!("the events of an earlier version are still in {LAST_AGENDA}: {err}");
+        }
+    }
+
+    /// The link's state kept for the next start when it changed, readable by the bundle only.
+    /// The first state of a run is written whatever the file holds: a file of an earlier
+    /// version has events in it.
+    fn keep(&mut self, link: CalendarLink) {
+        if self.written == Some(link) {
+            return;
+        }
+        let kept = agenda_of(link).write_to_bytes().map_err(std::io::Error::other).and_then(|bytes| self.store.save_private(LAST_AGENDA, &bytes));
+        match kept {
+            Ok(()) => self.written = Some(link),
+            Err(err) => log::warn!("the link's state not kept: {err}"),
         }
     }
 }
@@ -680,7 +684,7 @@ mod tests {
         let store = Arc::new(Store::at(&d));
         let mut link = Link::new(store.clone());
         link.linked(&grant());
-        link.connected(read(3), false, 1_763_285_400, Instant::now());
+        link.connected(read(3), false, 1_763_285_400);
         let google = Script::new(vec![Err(AuthError::Grant("invalid_grant: Token has been expired or revoked.".into()))], vec![]);
         let mut session = Session::new(client(), grant(), None, Instant::now());
         assert!(matches!(session.read(&google, &store, Instant::now(), 0).await, Outcome::Revoked(why) if why.contains("invalid_grant")));
@@ -689,7 +693,7 @@ mod tests {
         assert!(!d.join(GRANT_FILE).exists(), "the grant is forgotten");
         assert_eq!(mode(d.join(LAST_AGENDA)), 0o600);
         // expired after a restart too, and no events from before
-        assert_eq!(Link::new(store).last(), (true, None));
+        assert_eq!(Link::new(store).expired(), true);
         // the scope gone is the same
         let google = Script::new(vec![Err(AuthError::Scope)], vec![]);
         assert!(matches!(Session::new(client(), grant(), None, Instant::now()).read(&google, &Store::at(&d), Instant::now(), 0).await, Outcome::Revoked(_)));
@@ -705,7 +709,7 @@ mod tests {
         let mut link = Link::new(store.clone());
         let client = link.client().unwrap();
         link.linked(&grant());
-        link.connected(read(3), false, 1_763_285_400, Instant::now());
+        link.connected(read(3), false, 1_763_285_400);
         // the secret reset in the Cloud console
         let google = Script::new(vec![Err(AuthError::Client("invalid_client: Unauthorized".into()))], vec![]);
         let outcome = Session::new(client.clone(), grant(), None, Instant::now()).read(&google, &store, Instant::now(), 0).await;
@@ -713,7 +717,7 @@ mod tests {
         let agenda = link.refused();
         // the events of before are dropped: the screen shows no client, not an old week
         assert_eq!((link_of(&agenda), agenda.events.len(), agenda.calendar.as_str()), (CalendarLink::CALENDAR_NO_CLIENT, 0, ""));
-        assert_eq!(Link::new(store.clone()).last(), (false, None));
+        assert_eq!(Link::new(store.clone()).expired(), false);
         assert!(link.client().unwrap_err().contains("refused"));
         // the grant stays: a new secret keeps the client's id
         assert!(link.grant(&client).is_some());
@@ -738,23 +742,23 @@ mod tests {
     }
 
     #[test]
-    fn the_last_agenda_at_a_start() {
+    fn only_the_link_s_state_is_kept_for_the_next_start() {
         let d = dir("last");
         let store = Arc::new(Store::at(&d));
         let mut link = Link::new(store.clone());
-        assert_eq!(link.last(), (false, None));
-        let agenda = link.connected(read(2), false, 1_763_285_400, Instant::now());
+        assert!(!link.expired());
+        let agenda = link.connected(read(2), false, 1_763_285_400);
+        assert_eq!(agenda.events.len(), 2);
         assert_eq!(mode(d.join(LAST_AGENDA)), 0o600);
-        assert_eq!(link.last(), (false, Some(agenda)));
-        // older than a day: not shown
-        let old = SystemTime::now() - LAST_MAX_AGE - Duration::from_secs(60);
-        fs::File::options().write(true).open(d.join(LAST_AGENDA)).unwrap().set_modified(old).unwrap();
-        assert_eq!(link.last(), (false, None));
+        // the file says connected and holds no event, no calendar and no time of a read
+        let kept = Agenda::parse_from_bytes(&fs::read(d.join(LAST_AGENDA)).unwrap()).unwrap();
+        assert_eq!(kept, agenda_of(CalendarLink::CALENDAR_CONNECTED));
+        assert!(!Link::new(store.clone()).expired());
         // expired a month ago: still expired
         link.revoked();
         let month = SystemTime::now() - Duration::from_secs(30 * 24 * 3600);
         fs::File::options().write(true).open(d.join(LAST_AGENDA)).unwrap().set_modified(month).unwrap();
-        assert_eq!(link.last(), (true, None));
+        assert!(Link::new(store).expired());
     }
 
     #[test]
@@ -803,39 +807,65 @@ mod tests {
         let not_read = failed(Some(&agenda_of(CalendarLink::CALENDAR_CONNECTED))).unwrap();
         assert_eq!((not_read.read_failed, not_read.updated, not_read.events.len()), (true, 0, 0));
         // read once: a failure keeps the events and the time of that read
-        let first = link.connected(read(2), false, 1000, Instant::now());
+        let first = link.connected(read(2), false, 1000);
         let after = failed(Some(&first)).unwrap();
         assert_eq!((after.read_failed, after.updated, after.events.len()), (true, 1000, 2));
         assert_eq!(after, Agenda { read_failed: true, ..first });
-        // the next read clears it, and the kept agenda never has it
-        assert!(!link.connected(read(2), false, 1060, Instant::now()).read_failed);
-        assert!(!Agenda::parse_from_bytes(&fs::read(d.join(LAST_AGENDA)).unwrap()).unwrap().read_failed);
+        // the next read clears it
+        assert!(!link.connected(read(2), false, 1060).read_failed);
         // nothing to mark when the last agenda is not connected, or there is none
         assert_eq!(failed(Some(&agenda_of(CalendarLink::CALENDAR_EXPIRED))), None);
         assert_eq!(failed(None), None);
     }
 
     #[test]
-    fn an_unchanged_agenda_is_not_written_every_minute() {
+    fn a_file_of_an_earlier_version_loses_its_events_at_the_start() {
+        let d = dir("forget");
+        let link = Link::new(Arc::new(Store::at(&d)));
+        let file = d.join(LAST_AGENDA);
+        // nothing there: nothing made
+        link.forget_events();
+        assert!(!file.exists());
+        // the last agenda of an earlier version, an expired one and a connected one
+        for state in [CalendarLink::CALENDAR_EXPIRED, CalendarLink::CALENDAR_CONNECTED] {
+            let old = Agenda { events: read(2).events, calendar: "owner@example.com".into(), updated: 1000, ..agenda_of(state) };
+            fs::write(&file, old.write_to_bytes().unwrap()).unwrap();
+            link.forget_events();
+            assert_eq!(Agenda::parse_from_bytes(&fs::read(&file).unwrap()).unwrap(), agenda_of(state));
+            assert_eq!(mode(file.clone()), 0o600);
+            assert_eq!(link.expired(), state == CalendarLink::CALENDAR_EXPIRED);
+        }
+    }
+
+    #[test]
+    fn a_refused_client_leaves_an_expired_link_expired() {
+        let d = dir("refused-expired");
+        let store = Arc::new(Store::at(&d));
+        let mut link = Link::new(store.clone());
+        link.revoked();
+        link.refused();
+        assert!(Link::new(store).expired());
+    }
+
+    #[test]
+    fn the_link_s_state_is_written_when_it_changes() {
         let d = dir("keep");
         let mut link = Link::new(Arc::new(Store::at(&d)));
-        let kept = || Agenda::parse_from_bytes(&fs::read(d.join(LAST_AGENDA)).unwrap()).unwrap().updated;
-        let t0 = Instant::now();
-        link.connected(read(2), false, 1000, t0);
-        assert_eq!(kept(), 1000);
-        // a minute later, the same events: published with the new time, not written
-        assert_eq!(link.connected(read(2), false, 1060, t0 + Duration::from_secs(60)).updated, 1060);
-        assert_eq!(kept(), 1000);
-        // changed: written at once
-        link.connected(read(3), false, 1120, t0 + Duration::from_secs(120));
-        assert_eq!(kept(), 1120);
-        // the same for an hour: written again
-        link.connected(read(3), false, 4720, t0 + Duration::from_secs(120) + KEEP_EVERY);
-        assert_eq!(kept(), 4720);
-        // after an expiry the next read is written whatever it is
+        let file = d.join(LAST_AGENDA);
+        let state = || link_of(&Agenda::parse_from_bytes(&fs::read(&file).unwrap()).unwrap());
+        // a file of an earlier version, with events: the first read writes over it
+        fs::write(&file, Agenda { events: read(2).events, ..agenda_of(CalendarLink::CALENDAR_CONNECTED) }.write_to_bytes().unwrap()).unwrap();
+        link.connected(read(2), false, 1000);
+        assert_eq!(Agenda::parse_from_bytes(&fs::read(&file).unwrap()).unwrap().events.len(), 0);
+        // the reads after it change nothing in the file: it is not written every minute
+        fs::remove_file(&file).unwrap();
+        assert_eq!(link.connected(read(3), false, 1060).updated, 1060);
+        assert!(!file.exists());
+        // expired, then connected again: written both times
         link.revoked();
-        link.connected(read(3), false, 4780, t0 + Duration::from_secs(180) + KEEP_EVERY);
-        assert_eq!(kept(), 4780);
+        assert_eq!(state(), CalendarLink::CALENDAR_EXPIRED);
+        link.connected(read(3), false, 1120);
+        assert_eq!(state(), CalendarLink::CALENDAR_CONNECTED);
     }
 
     #[test]
@@ -994,7 +1024,7 @@ mod tests {
         let mut link = Link::new(store.clone());
         let client = link.client().unwrap();
         link.linked(&change_grant());
-        link.connected(read(3), true, 1000, Instant::now());
+        link.connected(read(3), true, 1000);
         let google = Script { revoke: Mutex::new(vec![Ok(())].into()), ..Script::default() };
         let mut session = fresh(change_grant());
         assert_eq!(session.disconnect(&google).await, Ok(()));
@@ -1003,7 +1033,7 @@ mod tests {
         assert_eq!((link_of(&agenda), agenda.events.len(), agenda.can_change), (CalendarLink::CALENDAR_NOT_CONNECTED, 0, false));
         assert!(!d.join(GRANT_FILE).exists() && link.grant(&client).is_none());
         // a restart: not connected, not expired, no old events: the setup page with the choice
-        assert_eq!(Link::new(store).last(), (false, None));
+        assert_eq!(Link::new(store).expired(), false);
         assert_eq!(mode(d.join(LAST_AGENDA)), 0o600);
     }
 
@@ -1105,9 +1135,9 @@ mod tests {
         for e in &mut events.events {
             (e.can_respond, e.can_delete) = (true, true);
         }
-        let agenda = link.connected(events.clone(), true, 1000, Instant::now());
+        let agenda = link.connected(events.clone(), true, 1000);
         assert!(agenda.can_change && agenda.events.iter().all(|e| e.can_respond && e.can_delete));
-        let agenda = link.connected(events, false, 1060, Instant::now());
+        let agenda = link.connected(events, false, 1060);
         assert!(!agenda.can_change && agenda.events.iter().all(|e| !e.can_respond && !e.can_delete));
         // linked just now: the access granted, not read yet
         assert!(link.linked(&change_grant()).can_change);

@@ -100,7 +100,7 @@ page asks for the choice once more.
 | `oauth-client.json` | the owner's OAuth client, Google's downloaded JSON; put there by `scripts/calendar-client.sh`; never in git or in the image |
 | `grant.json` | the client's id, the refresh token and the granted scopes, mode 0600 |
 | `grants-replaced.json` | the grants of OAuth clients the owner replaced, until Google ended them, mode 0600 |
-| `agenda.pb` | the last agenda, mode 0600 (titles, places, the account's address), published again at the next start |
+| `agenda.pb` | the link's state (connected, expired, not connected, no client) as an agenda without events, mode 0600: an expired link stays expired across a restart |
 | `setup-url` | while the setup page is open: its URL with the one-time token, mode 0600, for the development flow; `scripts/calendar-setup-url.sh` prints it as a link for this computer |
 
 The colour of the calendar itself is not in the agenda: it needs the scope
@@ -137,7 +137,7 @@ why), and so does a client Google refuses (next section).
 
 | Google's answer | The bundle's directory | The agenda |
 |---|---|---|
-| a read | `agenda.pb` | `CALENDAR_CONNECTED` with the events and `updated` |
+| a read | `agenda.pb` says connected, without the events | `CALENDAR_CONNECTED` with the events and `updated` |
 | `invalid_grant` (the access revoked or ended), the calendar scope gone | `grant.json` removed | `CALENDAR_EXPIRED` without events, the setup page again; still expired after a restart |
 | `invalid_client`, `unauthorized_client`, `deleted_client` (the client deleted, its secret reset); the Calendar API turned off in the client's project (403 `accessNotConfigured`, `SERVICE_DISABLED`) | `grant.json` kept: a reset secret keeps the client's id, and the grant with it | `CALENDAR_NO_CLIENT` without events, not tried again until `oauth-client.json` changes (or the bundle restarts) |
 | anything else (no network, a quota, Google busy) | | the last agenda stays, with `read_failed` once the reads have failed for half a minute (at a start the network comes a few seconds after the bundle); `updated` tells its age; tried again after 2 s, then twice as long each time up to 5 minutes |
@@ -278,7 +278,7 @@ its own script only, by hash, and no referrer leaves it. Where it is hosted is n
 - `libs/https`: `post_form` for the token endpoint, `get_bearer` for the Calendar API's reads,
   `bearer` for its changes (a method, `If-Match`, a JSON body).
 - `libs/bundle-store`: the grant (`save_private`, 0600, written to a temporary file and
-  renamed), the last agenda, the client file.
+  renamed), the link's state, the client file.
 - `apex/`: manifest, orchestration (started at boot, instance-1), the authorization policy
   (`publisher` of `agenda`, `server` of `CalendarService`), test keys (public repository: not for
   a product).
@@ -287,7 +287,7 @@ its own script only, by hash, and no referrer leaves it. Where it is hosted is n
 
 | When | What the bundle publishes |
 |---|---|
-| at its start | the last agenda with an account, when it is a day old at most; else the state of the link |
+| at its start | the state of the link; with an account: connected, not read yet (no events, `updated` 0). The events of an earlier run are not kept |
 | every 10 s while there is no client | `CALENDAR_NO_CLIENT` until the file is there |
 | while there is no account | the setup URL; a new one after every use, every ten minutes and when the panel's address changes (read every 10 s) |
 | right after the link, then every minute | the agenda (a new event is on the screen within a minute) |
@@ -302,7 +302,7 @@ Every read is the whole window: seven days with the `fields` filter, a few kB, 1
 far below the Calendar API's quotas. Google's incremental sync (`syncToken`) does not fit: it
 cannot be combined with `timeMin`, `timeMax` and `orderBy`, so it would sync the whole calendar
 and the bundle would have to merge the changes into its own copy. `agenda.pb` is written when
-the agenda changed and otherwise once an hour, not every minute (the reads change only `updated`).
+the link's state changes, not at every read.
 
 With the descriptions an agenda is at most about 112 kB (40 events with 2000 bytes of
 description, 256 of meeting link and the rest of their bounds). The topic carries it as one
@@ -410,7 +410,7 @@ state, so the relay page sends the phone back to the same one.
     ends, a new refresh token kept at once (0600), `invalid_grant` and a lost scope end in
     `CALENDAR_EXPIRED` (also after a restart), a refused client and the Calendar API turned off
     end in `CALENDAR_NO_CLIENT` without events until the client file changes, the network tried
-    again, the last agenda at a start (a day old at most), a grant of another client not taken,
+    again, only the link's state kept for the next start, a grant of another client not taken,
     a read a minute and the backoff after failures (an hour of outage is at most 20 requests), an
     unchanged agenda not written every minute, the setup URL file (0600, removed);
   - the setup page's connections: from the QR code to the grant (the choice of access with its

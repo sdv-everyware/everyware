@@ -34,10 +34,11 @@ picture, the screen has nothing to decode and no picture library to run on untru
 
 - `src/lib.rs`: the shape `vsidlc --services` generates (`ServiceBundle`, `SdvComms`, a
   current-thread runtime, `sdv_main` with the two publishers). `handle_news_publisher`
-  publishes the last feed first, then reads the feed every ten minutes; a story's article and
-  picture are read once and kept by id while the story is in the feed.
+  reads the feed every ten minutes; a story's article and picture are read once and kept by
+  id while the story is in the feed.
 - `libs/bundle-store` (`libeveryware_bundle_store`): the last feed and its thumbnails in the
-  bundle's directory, for the next start.
+  bundle's directory, so that the next start does not read the stories' articles again. They
+  are not published: a feed of an earlier run is not the front page now.
 - `client/` (`libeveryware_news_client`, host test `everyware_news_client_test`): the Hacker
   News API (`topstories.json`, `item/<id>.json`), the meta tags of a page (`og:description`,
   else `description`; `og:image`, else `twitter:image`; entities decoded, the summary cut at a
@@ -56,9 +57,9 @@ then DHCP). So:
 
 | When (RB3, s since boot) | What the bundle publishes |
 |---|---|
-| at its start (about 6) | the last feed and its thumbnails, kept from the previous start (`feed.pb`, `thumbnails.pb`), not older than 24 hours |
-| tries every second until it works (about 19) | the new feed, as soon as the stories are known (titles; the summaries known from before) |
-| about 1 to 3 s later | the feed with the summaries of the new stories, and the thumbnails |
+| at its start (about 6) | nothing: it takes what it read of the stories' articles before (`feed.pb`, `thumbnails.pb`, not older than 24 hours) |
+| tries every second until it works (about 19) | the feed, as soon as the stories are known (titles; the summaries known from before) |
+| about 1 to 3 s later | the feed with the summaries of the new stories, and the thumbnails (those known from before among them) |
 | every ten minutes | the same two steps |
 
 A first attempt fails while there is no lease ("No address associated with hostname"). A new
@@ -90,6 +91,6 @@ keeps the placeholder of the design in its row.
 
 - `everyware_news_client_test` and `everyware_https_test` (host): parsing, meta tags, the
   thumbnail, URLs and redirects.
-- On the board: `adb logcat -s news_bundle` ("the last feed: 10 stories, 5 with a picture",
+- On the board: `adb logcat -s news_bundle` ("the last feed's articles: 10 stories, 5 with a picture",
   "10 stories, 1 new, their articles next", "10 stories, 8 with a summary, 5 with a
   picture"); the bridge: `-s dashboard_bundle` ("10 news stories").

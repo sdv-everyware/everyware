@@ -1,6 +1,6 @@
-// A service bundle's own files (src/lib.rs): the last messages a bundle published, published
-// again at its next start, and its own files (the calendar's grant). Used by the weather, the
-// news and the calendar bundles.
+// A service bundle's own files (src/lib.rs): what a bundle keeps for its next start (the
+// settings, what the news read of a story's article, the calendar's grant). Used by the news,
+// the calendar and the system bundles.
 
 package {
     default_applicable_licenses: ["Android-Apache-2.0"],

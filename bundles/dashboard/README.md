@@ -64,8 +64,10 @@ screen never waits for a connect that never started (decisions.md, 2026-11-06).
   any order.
 - Every topic is state, so every subscription is `read_on_subscribe`: it gets the
   publication's last message at once. What a bundle published before the bridge subscribed
-  (at boot: the weather's and the news' last values, kept from the previous start) reaches
-  the screen with its first frame instead of with the next new value.
+  reaches the screen at once instead of with the next new value. A bundle publishes nothing
+  before its first read of this run, so the screen does not start with the values of the run
+  before. What the bridge holds is as old as the publisher's last message: when one bundle
+  starts again, its last value stays here until its next one.
 - `interfaces/screen`: the two AIDL interfaces, and `link/`, the screen's side as a crate.
 - `apex/permissions.textproto`: subscriber of the seven topics, client of
   `com.everyware.WifiService` on the channel `wifi`, of `com.everyware.MatterService` on the

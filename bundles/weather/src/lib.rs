@@ -9,7 +9,6 @@
 use log::{debug, error, info, warn};
 use sdv::mw::{clientlib, Communicate, Publisher, SdvComms};
 use sdv_mw_rs_com_everyware_weather_service_bundle::{PublisherDescriptors, WeatherServiceBundle as Bundle};
-use everyware_bundle_store::Store;
 use everyware_catalog::weather::{Hour, Weather};
 use everyware_open_meteo as open_meteo;
 use std::sync::Arc;
@@ -25,20 +24,12 @@ const POLL_INTERVAL: Duration = Duration::from_secs(600);
 /// certificate is then "not yet valid"), so the first attempts fail; a failed attempt costs
 /// nothing but a request, so try again at once.
 const RETRY_INTERVAL: Duration = Duration::from_secs(1);
-/// The last reading, published again at the next start until the first new one: the screen
-/// has the weather at once instead of after the network (about 18 s after the boot).
-const LAST: &str = "weather.pb";
-/// Older than this the last reading is not shown: its forecast covers the next 24 hours, its
-/// current values only the hour they were read.
-const LAST_MAX_AGE: Duration = Duration::from_secs(3 * 3600);
 
 sdv::lifecycle::register_service_bundle!(WeatherServiceBundle);
 
 struct WeatherServiceBundle {
     cancellation_token: Option<CancellationToken>,
     context: ContextRef,
-    /// The bundle's directory (/data/service_bundle_data/<package>/<bundle>).
-    store: Arc<Store>,
 }
 
 impl ServiceBundle for WeatherServiceBundle {
@@ -46,15 +37,12 @@ impl ServiceBundle for WeatherServiceBundle {
         if let Err(err) = sdv::tracing::try_init_tracing() {
             warn!("Failed to init service bundles tracing: {err}");
         }
-        let fqin = context.get_self_fqin();
-        let store = Arc::new(Store::new(fqin.get_sdv_package_name(), fqin.get_service_bundle_name()));
-        Self { cancellation_token: None, context, store }
+        Self { cancellation_token: None, context }
     }
 
     fn on_start(&mut self) {
         // The runner has set up the logger already, with log_tag from the bundle manifest.
         let context = self.context;
-        let store = self.store.clone();
         let cancellation_token = CancellationToken::new();
         self.cancellation_token = Some(cancellation_token.clone());
         let Ok(runtime) =
@@ -66,7 +54,7 @@ impl ServiceBundle for WeatherServiceBundle {
             runtime.block_on(async move {
                 let comms = Arc::new(SdvComms { context });
                 let res = tokio::select! {
-                    res = sdv_main(comms, store) => res,
+                    res = sdv_main(comms) => res,
                     () = cancellation_token.cancelled() => Err(sdv::status::SdvStatus::new(sdv::status::SdvStatusCode::Cancelled)),
                 };
                 error!("Service bundle loop stopped: {res:?}.");
@@ -81,7 +69,7 @@ impl ServiceBundle for WeatherServiceBundle {
     }
 }
 
-async fn sdv_main(comms: Arc<dyn Communicate>, store: Arc<Store>) -> sdv::status::SdvResult<()> {
+async fn sdv_main(comms: Arc<dyn Communicate>) -> sdv::status::SdvResult<()> {
     info!("Starting service bundle 'WeatherServiceBundle'");
     let _service_bundle = match Bundle::builder().set_comms(comms.clone()).build().await {
         Ok(service) => service,
@@ -93,7 +81,7 @@ async fn sdv_main(comms: Arc<dyn Communicate>, store: Arc<Store>) -> sdv::status
     let mut futures_join_set = tokio::task::JoinSet::new();
     match clientlib::create_publisher(comms.as_ref(), PublisherDescriptors::<Weather>::WEATHER).await {
         Ok(publisher) => {
-            futures_join_set.spawn(handle_weather_publisher(publisher, store));
+            futures_join_set.spawn(handle_weather_publisher(publisher));
         }
         Err(e) => error!("Failed to create publisher Weather#weather: {e:?}"),
     }
@@ -103,15 +91,10 @@ async fn sdv_main(comms: Arc<dyn Communicate>, store: Arc<Store>) -> sdv::status
     Ok(())
 }
 
-/// The last reading first, then Open-Meteo every ten minutes; every reading is published and
-/// kept.
-async fn handle_weather_publisher(publisher: Publisher<Weather>, store: Arc<Store>) {
-    if let Some(last) = store.load::<Weather>(LAST, LAST_MAX_AGE) {
-        info!("the last reading, of {}: {} °C", last.time, last.temperature_c);
-        if let Err(e) = publisher.publish(&last) {
-            error!("Failed to publish on Weather#weather: {e:?}");
-        }
-    }
+/// Open-Meteo every ten minutes; every reading is published. Nothing is published before the
+/// first reading of this run: a reading of an earlier run is not the weather now, and a screen
+/// that has none says that it waits.
+async fn handle_weather_publisher(publisher: Publisher<Weather>) {
     info!("polling Open-Meteo every {} s", POLL_INTERVAL.as_secs());
     loop {
         let wait = match open_meteo::fetch(&LOCATION).await {
@@ -119,12 +102,7 @@ async fn handle_weather_publisher(publisher: Publisher<Weather>, store: Arc<Stor
                 info!("weather: {weather}, {} hours", weather.hourly.len());
                 let message = to_message(&weather);
                 match publisher.publish(&message) {
-                    Ok(()) => {
-                        if let Err(err) = store.save(LAST, &message) {
-                            warn!("the reading not kept: {err}");
-                        }
-                        POLL_INTERVAL
-                    }
+                    Ok(()) => POLL_INTERVAL,
                     Err(e) => {
                         error!("Failed to publish on Weather#weather: {e:?}");
                         RETRY_INTERVAL
