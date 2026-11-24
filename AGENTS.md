@@ -50,7 +50,8 @@ from the Figma layer to the frame).
 Every change, a line of a doc as well, goes the same way:
 
 ```
-the user asks ──► 1 a branch feature/<name> in every repository the change touches
+the user asks ──► 1 a ticket, and a branch feature/<name> linked to it in every repository
+                    the change touches
               ──► 2 the author works and commits on the branch only
               ──► 3 another agent reviews the branch (the review skill): blocker, fix, note
               ──► 4 the author fixes; the reviewer looks again; the verdict is recorded
@@ -70,6 +71,16 @@ $FS land <name> "<summary>"           # 6: only after the user's word
 $FS accept-main <repo>                # main was moved another way and the user decided it is right
 ```
 
+- **Every commit belongs to a ticket and is found from it.** Before the first commit there is
+  a ticket in `sdv-everyware/everyware`, and every branch of the change is linked to it, so that
+  the ticket's Development block lists the branch. GitHub links a branch only when it creates
+  it, a branch that was pushed first cannot be linked afterwards. So after `feature.sh start`,
+  with the project's GitHub account:
+  `gh issue develop <number> -R sdv-everyware/everyware --branch-repo sdv-everyware/<repository> --name feature/<name> --base <base branch>`
+  creates the branch on GitHub at the base and links it; the first push of the local branch then
+  goes into it. Every commit message ends with `Part of sdv-everyware/everyware#<number>` (in
+  `everyware` itself `Part of #<number>`), which puts the commit into the ticket's timeline. A
+  commit without a ticket is not made: ask for the ticket first.
 - **The reviewer is not the author.** The author starts another agent with a fresh context and
   gives it three things: the branch's name, what the user asked for in the user's own words, and
   the review skill. Not the author's explanation of why the change is right.
