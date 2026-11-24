@@ -135,6 +135,10 @@ Working with the user:
 In the code:
 
 - **Production, not workarounds:** remove the cause; a patch is a real fix or it is not made.
+- **A change in harry or in other AOSP code has a test** in that module's own test target. The
+  test fails when the change is lost: it tries the behaviour where the AOSP code uses the change,
+  not only a helper the change adds. After the update to the next AOSP version the tests say
+  which changes did not survive it. What no test can show is named in the pull request.
 - **The UI library knows no use case** (`vendor/sdv-everyware/ui-lib/AGENTS.md`): what an app shows is the app's.
 - **A design's names are a contract** with the app's `ui_model.rs`: change both in one commit.
 - **Docs describe what is,** in English, without the history of how it came to be; no em dashes.
