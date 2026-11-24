@@ -198,8 +198,8 @@ async fn sdv_main(context: ContextRef, comms: Arc<dyn Communicate>) -> SdvResult
     // The publishers may start later than this bundle: every subscription waits on its own.
     // Every topic is state (the weather now, the feed now, the networks now): a subscription
     // gets the publication's last message at once (read_on_subscribe), so what a bundle
-    // published before this one subscribed, its last reading kept from the previous start
-    // among it, reaches the screen (the thumbnails of a feed are one message for this).
+    // published before this one subscribed reaches the screen (the thumbnails of a feed are
+    // one message for this).
     let latest = SubscribeOptions::builder().read_on_subscribe(true).build()?;
     let weather = SubscriberDescriptors::<Weather>::WEATHER;
     if wait_for_publisher_to_be_available(comms.as_ref(), weather).await.is_ok() {

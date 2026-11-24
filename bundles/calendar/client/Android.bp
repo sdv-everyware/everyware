@@ -37,7 +37,7 @@ rust_defaults {
         "libeveryware_https",
         // the setup page's connections, the timeouts
         "libtokio",
-        // the grant, the last agenda, the client file (libs/bundle-store)
+        // the grant, the link's state, the client file (libs/bundle-store)
         "libeveryware_bundle_store",
     ],
     // the Google trait (google.rs), so that the tests answer for Google

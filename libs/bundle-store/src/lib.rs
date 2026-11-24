@@ -1,6 +1,6 @@
-//! A service bundle's own files: the last messages it published, kept so that it can publish
-//! them again at its next start, before its source answers (the network comes up seconds after
-//! the bundle starts).
+//! A service bundle's own files: what it keeps for its next start (a setting the user chose,
+//! what was read of a story's article, a grant). A bundle does not publish a kept value as the
+//! state of now: what it publishes it has read in this run.
 //!
 //! The directory is the one SDV gives every bundle, `/data/service_bundle_data/<SDV package>/
 //! <bundle>` (the lifecycle manager creates it with the bundle's uid; SELinux type
@@ -43,7 +43,7 @@ impl Store {
 
     /// The message in `name`, when there is one, it parses and it is not older than `max_age`.
     /// A message whose file is newer than the clock (the clock not yet set at boot) counts as
-    /// fresh: its age is unknown, and an old message is better than none.
+    /// fresh: its age is unknown.
     pub fn load<M: Message>(&self, name: &str, max_age: Duration) -> Option<M> {
         let path = self.dir.join(name);
         let modified = fs::metadata(&path).and_then(|m| m.modified()).ok()?;

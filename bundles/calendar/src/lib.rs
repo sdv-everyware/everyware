@@ -231,7 +231,7 @@ fn refuse(asked: Asked) {
 
 /// The grants of clients the owner replaced: useless with the new client, still good at Google.
 /// They are set aside at once (a new link cannot overwrite them), then ended at Google in a task
-/// of its own, so the loop (the saved agenda, the setup page, the changes) never waits for
+/// of its own, so the loop (the setup page, the reads, the changes) never waits for
 /// Google; one Google could not be told about stays aside and is tried again at the loop's next
 /// pass and the next start. One such task at a time (`ending`).
 fn end_replaced(link: &Link, client: &ClientConfig, ending: &Arc<AtomicBool>) {
@@ -283,11 +283,13 @@ fn unix_now() -> i64 {
 
 /// The link's states, one after the other (client/src/link.rs has the table): no usable client
 /// (look at its file every 10 s), no account (the setup page), an account (the agenda), and back:
-/// to the setup page when the grant is revoked, to no client when Google refuses the client. The
-/// last agenda of the previous start goes out first, with a grant and when it is a day old at most.
+/// to the setup page when the grant is revoked, to no client when Google refuses the client. With
+/// a grant the start publishes "connected, not read yet": the agenda of an earlier run is not kept.
 /// A change of the screen is made while an account is read, and refused in the other states.
 async fn handle_agenda_publisher(mut out: Output, mut link: Link, mut changes: mpsc::Receiver<Asked>) {
-    let (mut expired, mut kept) = link.last();
+    // a file of an earlier version holds events: only the link's state stays
+    link.forget_events();
+    let mut expired = link.expired();
     // a setup URL a stopped bundle left holds a token of no page any more
     link.setup_url("");
     let mut no_client = String::new();
@@ -310,14 +312,8 @@ async fn handle_agenda_publisher(mut out: Output, mut link: Link, mut changes: m
         end_replaced(&link, &client, &ending);
         let session = match link.grant(&client) {
             Some(grant) => {
-                match kept.take() {
-                    Some(last) => {
-                        info!("the last agenda: {} events", last.events.len());
-                        out.publish(last);
-                    }
-                    // connected, not read yet: updated 0
-                    None => out.publish(not_read(&grant)),
-                }
+                // connected, not read yet: updated 0
+                out.publish(not_read(&grant));
                 Session::new(client, grant, None, Instant::now())
             }
             None => {
@@ -464,7 +460,7 @@ async fn read_agenda(mut session: Session, link: &mut Link, out: &mut Output, ch
                     info!("{} events in the next {DAYS} days", read.events.len());
                     count = Some(read.events.len());
                 }
-                out.publish(link.connected(read, session.can_change(), unix_now(), Instant::now()));
+                out.publish(link.connected(read, session.can_change(), unix_now()));
                 pace.after_read()
             }
             Outcome::Revoked(why) => {

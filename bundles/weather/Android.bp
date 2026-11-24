@@ -24,8 +24,6 @@ rust_ffi_shared {
         "libsdv_status_rs",
         // the Open-Meteo client, HTTPS on SDV's TLS stack (bundles/weather/open-meteo)
         "libeveryware_open_meteo",
-        // the last reading, published at the next start (libs/bundle-store)
-        "libeveryware_bundle_store",
     ],
     proc_macros: ["libasync_trait"],
     apex_available: [

@@ -29,11 +29,11 @@ const POLL_INTERVAL: Duration = Duration::from_secs(600);
 /// certificate is then "not yet valid"), so the first attempts fail; a failed attempt costs
 /// one request, so try again at once.
 const RETRY_INTERVAL: Duration = Duration::from_secs(1);
-/// The last feed and its thumbnails, published again at the next start until the first new
-/// feed.
+/// The last feed and its thumbnails: what was read of the stories' articles, so that the
+/// next start does not read them again. They are not published.
 const LAST_FEED: &str = "feed.pb";
 const LAST_THUMBNAILS: &str = "thumbnails.pb";
-/// Older than this the last feed is not shown: the front page has moved on.
+/// Older than this the last feed's articles are not taken: the front page has moved on.
 const LAST_MAX_AGE: Duration = Duration::from_secs(24 * 3600);
 
 sdv::lifecycle::register_service_bundle!(NewsServiceBundle);
@@ -114,7 +114,8 @@ struct Article {
     thumbnail: Option<Vec<u8>>,
 }
 
-/// The last feed first, then the top stories every ten minutes. A round publishes the feed as
+/// The top stories every ten minutes. Nothing is published before the first feed of this run:
+/// a feed of an earlier run is not the front page now. A round publishes the feed as
 /// soon as the stories are known (the summaries read before), reads the articles and the
 /// pictures of the new stories, then publishes the feed again with their summaries and the
 /// thumbnails of the stories that have one, all in one message. A story's article and
@@ -123,12 +124,10 @@ async fn handle_news_publisher(publisher: Publisher<NewsFeed>, thumbnails: Publi
     let mut articles: HashMap<u64, Article> = HashMap::new();
     if let Some(feed) = store.load::<NewsFeed>(LAST_FEED, LAST_MAX_AGE) {
         articles = restore(store, &feed);
-        info!("the last feed: {} stories, {} with a picture", feed.stories.len(), articles.values().filter(|a| a.thumbnail.is_some()).count());
-        // without its thumbnails the feed goes out with what it has, its articles are read again
+        info!("the last feed's articles: {} stories, {} with a picture", articles.len(), articles.values().filter(|a| a.thumbnail.is_some()).count());
         if articles.is_empty() {
             info!("no thumbnails kept, the articles are read again");
         }
-        publish(&publisher, &thumbnails, &feed, &articles);
     }
     info!("polling Hacker News every {} s", POLL_INTERVAL.as_secs());
     loop {
