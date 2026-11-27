@@ -1,0 +1,42 @@
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//      http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+package {
+    default_applicable_licenses: ["Android-Apache-2.0"],
+}
+
+// The Power HAL of the platform: the clients tell it of a touch and of the time their frames
+// take, and it gives their threads CPU speed while they need it. One implementation for
+// every device: it works from what it is told, not from a table of a device.
+rust_binary {
+    name: "android.hardware.power-service.everyware",
+    relative_install_path: "hw",
+    init_rc: ["everyware-power.rc"],
+    vintf_fragments: ["everyware-power.xml"],
+    vendor: true,
+    srcs: ["src/main.rs"],
+    rustlibs: [
+        "android.hardware.power-V7-rust",
+        "libbinder_rs",
+        "liblibc",
+        "liblog_rust",
+        "liblogger",
+    ],
+}
+
+// The rules of the service, without the system: they run on the host.
+rust_test {
+    name: "everyware_power_test",
+    srcs: ["src/speed.rs"],
+    host_supported: true,
+    test_suites: ["general-tests"],
+}
