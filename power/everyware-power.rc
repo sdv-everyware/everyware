@@ -1,0 +1,7 @@
+# The Power HAL of the platform. It changes how the threads of its clients are scheduled, so
+# it needs the capability for that, and nothing else of root.
+service vendor.power-everyware /vendor/bin/hw/android.hardware.power-service.everyware
+    class hal
+    user system
+    group system
+    capabilities SYS_NICE
