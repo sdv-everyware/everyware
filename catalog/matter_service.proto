@@ -58,6 +58,16 @@ message MatterSetFanMode {
     string mode = 3 [(.sdv.vsidl.v1.variable_type_max_size) = 16];
 }
 
+// Give a device of the house a name: an endpoint of a node, as the house sees one device per
+// endpoint. The bundle keeps the name and publishes it with the device (MatterEndpoint.name);
+// the device itself is not told. At most 32 bytes of UTF-8, cut there; an empty name takes the
+// name away.
+message MatterRename {
+    uint64 node_id = 1;
+    uint32 endpoint = 2;
+    string name = 3 [(.sdv.vsidl.v1.variable_type_max_size) = 32];
+}
+
 // One command, as the screen sends it through the dashboard bundle (which calls the matching rpc).
 message MatterCommand {
     oneof command {
@@ -67,6 +77,7 @@ message MatterCommand {
         MatterSetSetpoint set_setpoint = 4;
         MatterSetSystemMode set_system_mode = 5;
         MatterSetFanMode set_fan_mode = 6;
+        MatterRename rename = 7;
     }
 }
 
@@ -78,4 +89,7 @@ service MatterService {
     rpc SetSetpoint(MatterSetSetpoint) returns (MatterResult);
     rpc SetSystemMode(MatterSetSystemMode) returns (MatterResult);
     rpc SetFanMode(MatterSetFanMode) returns (MatterResult);
+    // Names a device; answered when the name is kept ("no such device" for an endpoint the
+    // bundle has not read).
+    rpc Rename(MatterRename) returns (MatterResult);
 }

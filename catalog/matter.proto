@@ -50,6 +50,9 @@ message MatterEndpoint {
     MatterOnOff on_off = 5;
     MatterLevel level = 6;
     MatterFan fan = 7;
+    // The name the house gave this device (MatterService.Rename); empty: none, and a screen
+    // shows its own word for the device.
+    string name = 8 [(.sdv.vsidl.v1.variable_type_max_size) = 32];
 }
 
 message MatterThermostat {
